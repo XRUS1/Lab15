@@ -1,20 +1,46 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>three.js xr - dragging trophy with finger + TransformControls</title>
+    <title>three.js xr - dragging trophy (Lab15)</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; background-color: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
-        #info { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 100; pointer-events: none; }
-        a { color: #4af; text-decoration: none; }
-        #status { position: absolute; bottom: 10px; width: 100%; text-align: center; color: #0f0; font-family: monospace; font-size: 13px; pointer-events: none; z-index: 100; }
+        body {
+            margin: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: sans-serif;
+            overflow: hidden;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            z-index: 100;
+            pointer-events: none;
+        }
+        a {
+            color: #4af;
+            text-decoration: none;
+        }
+        #status {
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            text-align: center;
+            color: #0f0;
+            font-family: monospace;
+            font-size: 13px;
+            pointer-events: none;
+            z-index: 100;
+        }
     </style>
 </head>
 <body>
 
     <div id="info">
-        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - dragging trophy with finger
+        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - dragging trophy (Lab15)
     </div>
     <div id="status">Iniciando...</div>
 
@@ -48,10 +74,6 @@
         const clock = new THREE.Clock();
 
         let controls, group;
-
-        // â”€â”€â”€ Para puente tÃ¡ctil â”€â”€â”€
-        let touchId = null;
-        let isPointerDown = false;
 
         init();
         animate();
@@ -93,10 +115,10 @@
             group = new THREE.Group();
             scene.add(group);
 
-            // --- CUBO PADRE: invisible ---
+            // --- CUBO PADRE: invisible, para raycasting y drag ---
             const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-            const hitMaterial = new THREE.MeshBasicMaterial({ 
-                transparent: true, 
+            const hitMaterial = new THREE.MeshBasicMaterial({
+                transparent: true,
                 opacity: 0.0,
                 depthWrite: false,
                 depthTest: false
@@ -107,7 +129,7 @@
             trophyContainer.renderOrder = -1;
             group.add(trophyContainer);
 
-            // --- CARGAR TROFEO GLB ---
+            // --- CARGAR TROFEO GLB: mantiene su material original ---
             const loader = new GLTFLoader();
             loader.load('./models/gltf/Trophy.glb', function (gltf) {
 
@@ -137,13 +159,13 @@
             renderer.xr.enabled = true;
             container.appendChild(renderer.domElement);
 
-            // â”€â”€â”€ BOTON XR: EXACTAMENTE COMO LAB12 â”€â”€â”€
+            // --- BOTON XR ---
             document.body.appendChild(XRButton.createButton(renderer, {
                 'optionalFeatures': ['depth-sensing'],
                 'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
             }));
 
-            // â”€â”€â”€ TRANSFORM CONTROLS â”€â”€â”€
+            // --- TRANSFORM CONTROLS (Desktop) ---
             transformControls = new TransformControls(camera, renderer.domElement);
             transformControls.attach(trophyContainer);
             transformControls.setSize(0.75);
@@ -157,21 +179,7 @@
                 controls.enabled = !event.value;
             });
 
-            transformControls.addEventListener('change', function () {
-                if (!transformControls.dragging) {
-                    trophyContainer.rotation.set(0, 0, 0);
-                }
-            });
-
-            // â”€â”€â”€ PUENTE TACTIL: SOLO EN EL CANVAS, NO EN BOTONES â”€â”€â”€
-            // Usamos el canvas de renderer, NO el document completo
-            const canvas = renderer.domElement;
-            canvas.addEventListener('touchstart', onTouchStart, { passive: false });
-            canvas.addEventListener('touchmove', onTouchMove, { passive: false });
-            canvas.addEventListener('touchend', onTouchEnd, { passive: false });
-            canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
-
-            // â”€â”€â”€ CONTROLADOR VR (del Lab12 original) â”€â”€â”€
+            // --- CONTROLADOR VR (Lab12) ---
             controller1 = renderer.xr.getController(0);
             controller1.addEventListener('selectstart', onSelectStart);
             controller1.addEventListener('selectend', onSelectEnd);
@@ -188,6 +196,24 @@
 
             raycaster = new THREE.Raycaster();
             window.addEventListener('resize', onWindowResize);
+
+            // --- ALTERNAR ENTRE MODO DESKTOP Y XR ---
+            renderer.xr.addEventListener('sessionstart', function () {
+                // Entrando a XR: desactivar TransformControls y OrbitControls
+                transformControls.detach();
+                transformControls.visible = false;
+                controls.enabled = false;
+                updateStatus();
+            });
+
+            renderer.xr.addEventListener('sessionend', function () {
+                // Saliendo de XR: reactivar TransformControls y OrbitControls
+                transformControls.attach(trophyContainer);
+                transformControls.visible = true;
+                controls.enabled = true;
+                controls.update();
+                updateStatus();
+            });
         }
 
         function onWindowResize() {
@@ -196,78 +222,7 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // â”€â”€â”€ PUENTE TACTIL: solo en canvas â”€â”€â”€
-        function onTouchStart(event) {
-            if (!renderer.xr.isPresenting) return; // Solo en AR
-            if (event.touches.length !== 1) return;
-
-            const touch = event.touches[0];
-            touchId = touch.identifier;
-
-            const rect = renderer.domElement.getBoundingClientRect();
-            const x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
-            const y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
-
-            raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
-            const gizmoHits = raycaster.intersectObjects(transformControls.children, true);
-
-            if (gizmoHits.length > 0) {
-                event.preventDefault();
-                isPointerDown = true;
-                dispatchPointer('pointerdown', touch.clientX, touch.clientY);
-            }
-        }
-
-        function onTouchMove(event) {
-            if (!renderer.xr.isPresenting || touchId === null) return;
-
-            let touch = null;
-            for (let i = 0; i < event.touches.length; i++) {
-                if (event.touches[i].identifier === touchId) {
-                    touch = event.touches[i];
-                    break;
-                }
-            }
-            if (!touch) return;
-
-            event.preventDefault();
-            dispatchPointer('pointermove', touch.clientX, touch.clientY);
-        }
-
-        function onTouchEnd(event) {
-            if (!renderer.xr.isPresenting || touchId === null) return;
-
-            let touch = null;
-            for (let i = 0; i < event.changedTouches.length; i++) {
-                if (event.changedTouches[i].identifier === touchId) {
-                    touch = event.changedTouches[i];
-                    break;
-                }
-            }
-            if (!touch) return;
-
-            event.preventDefault();
-            isPointerDown = false;
-            dispatchPointer('pointerup', touch.clientX, touch.clientY);
-            touchId = null;
-        }
-
-        function dispatchPointer(type, cx, cy) {
-            const rect = renderer.domElement.getBoundingClientRect();
-            renderer.domElement.dispatchEvent(new PointerEvent(type, {
-                bubbles: true,
-                cancelable: true,
-                pointerId: 1,
-                pointerType: 'touch',
-                clientX: cx,
-                clientY: cy,
-                button: 0,
-                buttons: isPointerDown ? 1 : 0,
-                isPrimary: true
-            }));
-        }
-
-        // â”€â”€â”€ CONTROLADOR VR (del Lab12) â”€â”€â”€
+        // --- CONTROLADOR VR (Lab12) ---
         function onSelectStart(event) {
             const controller = event.target;
             const intersections = getIntersections(controller);
@@ -331,6 +286,14 @@
             }
         }
 
+        function updateStatus() {
+            const statusEl = document.getElementById('status');
+            if (!statusEl) return;
+            const mode = renderer.xr.isPresenting ? 'XR ACTIVO' : 'DESKTOP';
+            const tc = transformControls.visible ? 'ON' : 'OFF';
+            statusEl.innerHTML = 'Modo: ' + mode + ' | TransformControls: ' + tc + ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
+        }
+
         function animate() {
             renderer.setAnimationLoop(render);
         }
@@ -340,7 +303,7 @@
 
             group.rotation.set(0, 0, 0);
 
-            // AnimaciÃ³n del trofeo
+            // Animacion del trofeo: rotacion Y + levitacion
             group.children.forEach(cubeContainer => {
                 const model = cubeContainer.getObjectByName("animatedItem");
                 if (model) {
@@ -348,6 +311,11 @@
                     model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
                 }
             });
+
+            // Forzar orientacion: cara de abajo siempre al piso (ambos modos)
+            if (trophyContainer) {
+                trophyContainer.rotation.set(0, 0, 0);
+            }
 
             // Depth sensing
             if (renderer.xr.hasDepthSensing() && !isDepthSupplied) {
@@ -360,13 +328,13 @@
             cleanIntersected();
             intersectObjects(controller1);
 
-            // Status
-            const statusEl = document.getElementById('status');
-            if (statusEl) {
-                statusEl.innerHTML = 'Modo: TRANSLATE | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF') + ' | ' + (renderer.xr.isPresenting ? 'AR ACTIVO' : 'AR INACTIVO');
+            updateStatus();
+
+            // OrbitControls solo en desktop
+            if (!renderer.xr.isPresenting) {
+                controls.update();
             }
 
-            controls.update();
             renderer.render(scene, camera);
         }
 
