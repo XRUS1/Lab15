@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>three.js xr - dragging trophy with finger + TransformControls</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        body {
+            margin: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: sans-serif;
+            overflow: hidden;
+            touch-action: none;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            z-index: 100;
+            pointer-events: none;
+            font-size: 14px;
+            text-shadow: 1px 1px 2px #000;
+        }
+        a { color: #4af; text-decoration: none; }
+        #status {
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            text-align: center;
+            color: #0f0;
+            font-family: monospace;
+            font-size: 13px;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px #000;
+            z-index: 100;
+            line-height: 1.5;
+        }
+        #controls-help {
+            position: absolute;
+            top: 40px;
+            left: 10px;
+            color: #fff;
+            font-family: monospace;
+            font-size: 11px;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px #000;
+            z-index: 100;
+            background: rgba(0,0,0,0.4);
+            padding: 8px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info">
+        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - dragging trophy with finger
+    </div>
+
+    <div id="controls-help">
+        +-- Touch Controls --+<br>
+        ¦ Tap axis  : Grab   ¦<br>
+        ¦ Drag      : Move   ¦<br>
+        ¦ Tap floor : Place  ¦<br>
+        +--------------------+
+    </div>
+
+    <div id="status">Iniciando...</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "./build/three.module.js",
+                "three/addons/": "./jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+        import { XRButton } from 'three/addons/webxr/XRButton.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        let container;
+        let camera, scene, renderer;
+        let controls, transformControls;
+        let group, trophyContainer;
+        let hitTestSource = null;
+        let hitTestSourceRequested = false;
+        const clock = new THREE.Clock();
+
+        let isDepthSupplied = false;
+        const statusEl = document.getElementById('status');
+
+        init();
+        animate();
+
+        function init() {
+            container = document.createElement('div');
+            document.body.appendChild(container);
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x808080);
+
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10);
+            camera.position.set(0, 1.6, 3);
+
+            controls = new OrbitControls(camera, container);
+            controls.target.set(0, 1.6, 0);
+            controls.update();
+
+            const floorGeometry = new THREE.PlaneGeometry(6, 6);
+            const floorMaterial = new THREE.ShadowMaterial({ opacity: 0.25, blending: THREE.CustomBlending, transparent: false });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            floor.name = 'floor';
+            scene.add(floor);
+
+            scene.add(new THREE.HemisphereLight(0xbcbcbc, 0xa5a5a5, 3));
+
+            const light = new THREE.DirectionalLight(0xffffff, 3);
+            light.position.set(0, 6, 0);
+            light.castShadow = true;
+            light.shadow.camera.top = 3;
+            light.shadow.camera.bottom = -3;
+            light.shadow.camera.right = 3;
+            light.shadow.camera.left = -3;
+            light.shadow.mapSize.set(4096, 4096);
+            scene.add(light);
+
+            group = new THREE.Group();
+            scene.add(group);
+
+            const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+            const hitMaterial = new THREE.MeshBasicMaterial({
+                transparent: true,
+                opacity: 0.0,
+                depthWrite: false,
+                depthTest: false
+            });
+            trophyContainer = new THREE.Mesh(geometry, hitMaterial);
+            trophyContainer.position.set(0, 1.0, -1.5);
+            trophyContainer.name = "trophyContainer";
+            trophyContainer.renderOrder = -1;
+            group.add(trophyContainer);
+
+            const loader = new GLTFLoader();
+            loader.load('./models/gltf/Trophy.glb', function (gltf) {
+                const trophyModel = gltf.scene;
+                trophyModel.traverse(function (child) {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+                trophyModel.scale.set(1.8, 1.8, 1.8);
+                trophyModel.position.set(0, 0, 0);
+                trophyModel.name = "animatedItem";
+                trophyContainer.add(trophyModel);
+            }, undefined, function (error) {
+                console.error('Error al cargar el trofeo:', error);
+            });
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.xr.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            document.body.appendChild(XRButton.createButton(renderer, {
+                'requiredFeatures': ['hit-test'],
+                'optionalFeatures': ['depth-sensing'],
+                'depthSensing': {
+                    'usagePreference': ['gpu-optimized', 'cpu-optimized'],
+                    'dataFormatPreference': ['luminance-alpha', 'float32']
+                }
+            }));
+
+            // --- TRANSFORM CONTROLS: SOLO TRASLACION ---
+            transformControls = new TransformControls(camera, renderer.domElement);
+            transformControls.attach(trophyContainer);
+            transformControls.setSize(0.75);
+            transformControls.setMode('translate');   // Solo translate
+            transformControls.showX = true;
+            transformControls.showY = true;
+            transformControls.showZ = true;
+            scene.add(transformControls);
+
+            // Desactivar OrbitControls mientras se arrastra
+            transformControls.addEventListener('dragging-changed', function (event) {
+                controls.enabled = !event.value;
+            });
+
+            // --- OPCION A: Resetear rotacion al soltar ---
+            transformControls.addEventListener('change', function () {
+                if (!transformControls.dragging) {
+                    trophyContainer.rotation.set(0, 0, 0);
+                }
+            });
+
+            window.addEventListener('resize', onWindowResize);
+            renderer.xr.addEventListener('sessionstart', onARSessionStart);
+            renderer.xr.addEventListener('sessionend', onARSessionEnd);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onARSessionStart() {
+            const session = renderer.xr.getSession();
+            controls.enabled = false;
+            scene.background = null;
+
+            if (!hitTestSourceRequested) {
+                session.requestReferenceSpace('viewer').then((refSpace) => {
+                    session.requestHitTestSource({ space: refSpace }).then((source) => {
+                        hitTestSource = source;
+                    });
+                });
+                session.addEventListener('end', () => {
+                    hitTestSourceRequested = false;
+                    hitTestSource = null;
+                });
+                hitTestSourceRequested = true;
+            }
+            updateStatus();
+        }
+
+        function onARSessionEnd() {
+            controls.enabled = true;
+            scene.background = new THREE.Color(0x808080);
+            updateStatus();
+        }
+
+        function readDepthFromFrame(frame) {
+            if (!frame) return;
+            const session = renderer.xr.getSession();
+            const refSpace = renderer.xr.getReferenceSpace();
+            if (!session || !refSpace) return;
+            try {
+                const viewerPose = frame.getViewerPose(refSpace);
+                if (!viewerPose) return;
+                for (const view of viewerPose.views) {
+                    const depthInfo = frame.getDepthInformation(view);
+                    isDepthSupplied = !!depthInfo;
+                }
+            } catch (e) {
+                isDepthSupplied = false;
+            }
+        }
+
+        function updateStatus() {
+            const depth = isDepthSupplied ? 'ON' : 'OFF';
+            const ar = renderer.xr.isPresenting ? 'AR ACTIVO' : 'AR INACTIVO';
+            statusEl.innerHTML = `Modo: TRANSLATE | Depth: ${depth} | ${ar}`;
+        }
+
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
+
+        function render(time, frame) {
+            const elapsedTime = clock.getElapsedTime();
+            readDepthFromFrame(frame);
+
+            if (trophyContainer && !transformControls.dragging) {
+                const model = trophyContainer.getObjectByName("animatedItem");
+                if (model) {
+                    model.rotation.y = elapsedTime * 1.5;
+                    model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
+                }
+            }
+
+            if (Math.floor(elapsedTime * 60) % 10 === 0) updateStatus();
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+    </script>
+</body>
+</html>
+	
+	
