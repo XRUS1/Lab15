@@ -68,6 +68,7 @@
         let raycaster;
         let transformControls;
         let trophyContainer;
+        let tcActive = false;
 
         const intersected = [];
         const tempMatrix = new THREE.Matrix4();
@@ -115,7 +116,7 @@
             group = new THREE.Group();
             scene.add(group);
 
-            // --- CUBO PADRE: invisible, para raycasting y drag ---
+            // --- CUBO PADRE: invisible ---
             const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
             const hitMaterial = new THREE.MeshBasicMaterial({
                 transparent: true,
@@ -129,7 +130,7 @@
             trophyContainer.renderOrder = -1;
             group.add(trophyContainer);
 
-            // --- CARGAR TROFEO GLB: mantiene su material original ---
+            // --- CARGAR TROFEO GLB ---
             const loader = new GLTFLoader();
             loader.load('./models/gltf/Trophy.glb', function (gltf) {
 
@@ -159,27 +160,37 @@
             renderer.xr.enabled = true;
             container.appendChild(renderer.domElement);
 
-            // --- BOTON XR ---
-            document.body.appendChild(XRButton.createButton(renderer, {
-                'optionalFeatures': ['depth-sensing'],
-                'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
-            }));
+            // --- BOTON XR (igual que Lab12) ---
+            const sessionInit = {
+                optionalFeatures: ['depth-sensing'],
+                depthSensing: {
+                    usagePreference: ['gpu-optimized'],
+                    dataFormatPreference: ['luminance-alpha']
+                }
+            };
+            document.body.appendChild(XRButton.createButton(renderer, sessionInit));
 
-            // --- TRANSFORM CONTROLS (Desktop) ---
-            transformControls = new TransformControls(camera, renderer.domElement);
-            transformControls.attach(trophyContainer);
-            transformControls.setSize(0.75);
-            transformControls.setMode('translate');
-            transformControls.showX = true;
-            transformControls.showY = true;
-            transformControls.showZ = true;
-            scene.add(transformControls);
+            // --- TRANSFORM CONTROLS (solo desktop) ---
+            try {
+                transformControls = new TransformControls(camera, renderer.domElement);
+                transformControls.attach(trophyContainer);
+                transformControls.setSize(0.75);
+                transformControls.setMode('translate');
+                transformControls.showX = true;
+                transformControls.showY = true;
+                transformControls.showZ = true;
+                scene.add(transformControls);
+                tcActive = true;
 
-            transformControls.addEventListener('dragging-changed', function (event) {
-                controls.enabled = !event.value;
-            });
+                transformControls.addEventListener('dragging-changed', function (event) {
+                    controls.enabled = !event.value;
+                });
+            } catch (e) {
+                console.error('Error al crear TransformControls:', e);
+                tcActive = false;
+            }
 
-            // --- CONTROLADOR VR (Lab12) ---
+            // --- CONTROLADOR VR (Lab12 original) ---
             controller1 = renderer.xr.getController(0);
             controller1.addEventListener('selectstart', onSelectStart);
             controller1.addEventListener('selectend', onSelectEnd);
@@ -197,23 +208,30 @@
             raycaster = new THREE.Raycaster();
             window.addEventListener('resize', onWindowResize);
 
-            // --- ALTERNAR ENTRE MODO DESKTOP Y XR ---
-            renderer.xr.addEventListener('sessionstart', function () {
-                // Entrando a XR: desactivar TransformControls y OrbitControls
+            // --- MANEJO DE SESION XR ---
+            renderer.xr.addEventListener('sessionstart', onSessionStart);
+            renderer.xr.addEventListener('sessionend', onSessionEnd);
+        }
+
+        function onSessionStart() {
+            console.log('XR session started');
+            if (transformControls && tcActive) {
                 transformControls.detach();
                 transformControls.visible = false;
-                controls.enabled = false;
-                updateStatus();
-            });
+            }
+            controls.enabled = false;
+            updateStatus();
+        }
 
-            renderer.xr.addEventListener('sessionend', function () {
-                // Saliendo de XR: reactivar TransformControls y OrbitControls
+        function onSessionEnd() {
+            console.log('XR session ended');
+            if (transformControls && tcActive) {
                 transformControls.attach(trophyContainer);
                 transformControls.visible = true;
-                controls.enabled = true;
-                controls.update();
-                updateStatus();
-            });
+            }
+            controls.enabled = true;
+            controls.update();
+            updateStatus();
         }
 
         function onWindowResize() {
@@ -289,9 +307,9 @@
         function updateStatus() {
             const statusEl = document.getElementById('status');
             if (!statusEl) return;
-            const mode = renderer.xr.isPresenting ? 'XR ACTIVO' : 'DESKTOP';
-            const tc = transformControls.visible ? 'ON' : 'OFF';
-            statusEl.innerHTML = 'Modo: ' + mode + ' | TransformControls: ' + tc + ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
+            const mode = renderer.xr.isPresenting ? 'XR' : 'DESKTOP';
+            const tc = (tcActive && transformControls && transformControls.visible) ? 'ON' : 'OFF';
+            statusEl.innerHTML = 'Modo: ' + mode + ' | TC: ' + tc + ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
         }
 
         function animate() {
@@ -303,7 +321,7 @@
 
             group.rotation.set(0, 0, 0);
 
-            // Animacion del trofeo: rotacion Y + levitacion
+            // Animacion del trofeo
             group.children.forEach(cubeContainer => {
                 const model = cubeContainer.getObjectByName("animatedItem");
                 if (model) {
@@ -312,16 +330,16 @@
                 }
             });
 
-            // Forzar orientacion: cara de abajo siempre al piso (ambos modos)
+            // Forzar orientacion: cara de abajo al piso (ambos modos)
             if (trophyContainer) {
                 trophyContainer.rotation.set(0, 0, 0);
             }
 
             // Depth sensing
-            if (renderer.xr.hasDepthSensing() && !isDepthSupplied) {
+            if (renderer.xr.hasDepthSensing && renderer.xr.hasDepthSensing() && !isDepthSupplied) {
                 isDepthSupplied = true;
                 console.log('Depth sensing disponible');
-            } else if (!renderer.xr.hasDepthSensing() && isDepthSupplied) {
+            } else if (renderer.xr.hasDepthSensing && !renderer.xr.hasDepthSensing() && isDepthSupplied) {
                 isDepthSupplied = false;
             }
 
