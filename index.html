@@ -5,36 +5,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body {
-            margin: 0;
-            background-color: #000;
-            color: #fff;
-            font-family: sans-serif;
-            overflow: hidden;
-        }
-        #info {
-            position: absolute;
-            top: 10px;
-            width: 100%;
-            text-align: center;
-            z-index: 100;
-            pointer-events: none;
-        }
-        a {
-            color: #4af;
-            text-decoration: none;
-        }
-        #status {
-            position: absolute;
-            bottom: 10px;
-            width: 100%;
-            text-align: center;
-            color: #0f0;
-            font-family: monospace;
-            font-size: 13px;
-            pointer-events: none;
-            z-index: 100;
-        }
+        body { margin: 0; background-color: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
+        #info { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 100; pointer-events: none; }
+        a { color: #4af; text-decoration: none; }
+        #status { position: absolute; bottom: 10px; width: 100%; text-align: center; color: #0f0; font-family: monospace; font-size: 13px; pointer-events: none; z-index: 100; }
     </style>
 </head>
 <body>
@@ -119,7 +93,7 @@
             group = new THREE.Group();
             scene.add(group);
 
-            // --- CUBO PADRE: invisible, para raycasting y drag ---
+            // --- CUBO PADRE: invisible ---
             const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
             const hitMaterial = new THREE.MeshBasicMaterial({ 
                 transparent: true, 
@@ -169,7 +143,7 @@
                 'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
             }));
 
-            // â”€â”€â”€ TRANSFORM CONTROLS (aÃ±adido al Lab12) â”€â”€â”€
+            // â”€â”€â”€ TRANSFORM CONTROLS â”€â”€â”€
             transformControls = new TransformControls(camera, renderer.domElement);
             transformControls.attach(trophyContainer);
             transformControls.setSize(0.75);
@@ -183,20 +157,21 @@
                 controls.enabled = !event.value;
             });
 
-            // Reset rotacion al soltar
             transformControls.addEventListener('change', function () {
                 if (!transformControls.dragging) {
                     trophyContainer.rotation.set(0, 0, 0);
                 }
             });
 
-            // â”€â”€â”€ PUENTE TACTIL: solo en AR â”€â”€â”€
-            document.addEventListener('touchstart', onTouchStart, { passive: false });
-            document.addEventListener('touchmove', onTouchMove, { passive: false });
-            document.addEventListener('touchend', onTouchEnd, { passive: false });
-            document.addEventListener('touchcancel', onTouchEnd, { passive: false });
+            // â”€â”€â”€ PUENTE TACTIL: SOLO EN EL CANVAS, NO EN BOTONES â”€â”€â”€
+            // Usamos el canvas de renderer, NO el document completo
+            const canvas = renderer.domElement;
+            canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+            canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+            canvas.addEventListener('touchend', onTouchEnd, { passive: false });
+            canvas.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
-            // â”€â”€â”€ CONTROLADOR VR (del Lab12 original, mantenido) â”€â”€â”€
+            // â”€â”€â”€ CONTROLADOR VR (del Lab12 original) â”€â”€â”€
             controller1 = renderer.xr.getController(0);
             controller1.addEventListener('selectstart', onSelectStart);
             controller1.addEventListener('selectend', onSelectEnd);
@@ -221,9 +196,9 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // â”€â”€â”€ PUENTE TACTIL â”€â”€â”€
+        // â”€â”€â”€ PUENTE TACTIL: solo en canvas â”€â”€â”€
         function onTouchStart(event) {
-            if (!renderer.xr.isPresenting) return;
+            if (!renderer.xr.isPresenting) return; // Solo en AR
             if (event.touches.length !== 1) return;
 
             const touch = event.touches[0];
