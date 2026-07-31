@@ -60,11 +60,11 @@
     </div>
 
     <div id="controls-help">
-        +-- Touch Controls --+<br>
-        ¦ Tap axis  : Grab   ¦<br>
-        ¦ Drag      : Move   ¦<br>
-        ¦ Tap floor : Place  ¦<br>
-        +--------------------+
+        ┌── Touch Controls ──┐<br>
+        │ Tap axis  : Grab   │<br>
+        │ Drag      : Move   │<br>
+        │ Tap floor : Place  │<br>
+        └────────────────────┘
     </div>
 
     <div id="status">Iniciando...</div>
@@ -93,9 +93,15 @@
         let hitTestSource = null;
         let hitTestSourceRequested = false;
         const clock = new THREE.Clock();
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
 
         let isDepthSupplied = false;
         const statusEl = document.getElementById('status');
+
+        // ─── Estado del puente táctil ───
+        let isDraggingGizmo = false;
+        let touchId = null;
 
         init();
         animate();
@@ -183,32 +189,138 @@
                 }
             }));
 
-            // --- TRANSFORM CONTROLS: SOLO TRASLACION ---
+            // ─── TRANSFORM CONTROLS: SOLO TRASLACION ───
             transformControls = new TransformControls(camera, renderer.domElement);
             transformControls.attach(trophyContainer);
-            transformControls.setSize(0.75);
-            transformControls.setMode('translate');   // Solo translate
+            transformControls.setSize(1.2);        // ← MAS GRANDE para AR
+            transformControls.setMode('translate');
             transformControls.showX = true;
             transformControls.showY = true;
             transformControls.showZ = true;
             scene.add(transformControls);
 
+            // ─── HACER EL GIZMO VISIBLE EN AR (fondo transparente) ───
+            transformControls.traverse(function (child) {
+                if (child.isMesh || child.isLine) {
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(function (m) {
+                                m.depthTest = false;
+                                m.depthWrite = false;
+                            });
+                        } else {
+                            child.material.depthTest = false;
+                            child.material.depthWrite = false;
+                        }
+                    }
+                    child.renderOrder = 1000;
+                }
+            });
+
             // Desactivar OrbitControls mientras se arrastra
             transformControls.addEventListener('dragging-changed', function (event) {
                 controls.enabled = !event.value;
+                isDraggingGizmo = event.value;
             });
 
-            // --- OPCION A: Resetear rotacion al soltar ---
+            // ─── OPCION A: Resetear rotacion al soltar ───
             transformControls.addEventListener('change', function () {
                 if (!transformControls.dragging) {
                     trophyContainer.rotation.set(0, 0, 0);
                 }
             });
 
+            // ─── PUENTE TACTIL: capturar toques y reenviarlos como PointerEvents ───
+            // En WebXR AR, los eventos DOM no llegan al canvas. Capturamos en document
+            // y los inyectamos como PointerEvent sintéticos.
+            document.addEventListener('touchstart', onTouchStart, { passive: false });
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
+            document.addEventListener('touchend', onTouchEnd, { passive: false });
+            document.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
             window.addEventListener('resize', onWindowResize);
             renderer.xr.addEventListener('sessionstart', onARSessionStart);
             renderer.xr.addEventListener('sessionend', onARSessionEnd);
         }
+
+        // ─── CONVERTIR TOUCH A POINTEREVENT SINTETICO ───
+        function onTouchStart(event) {
+            if (!renderer.xr.isPresenting) return; // En desktop, dejar que funcione nativo
+            if (event.touches.length !== 1) return;
+            event.preventDefault();
+
+            const touch = event.touches[0];
+            touchId = touch.identifier;
+
+            // Verificar si el toque cae sobre el gizmo
+            updateMouseFromTouch(touch);
+            raycaster.setFromCamera(mouse, camera);
+
+            // Si el rayo intersecta alguna parte del gizmo, inyectar pointerdown
+            const gizmoIntersects = raycaster.intersectObjects(transformControls.children, true);
+            if (gizmoIntersects.length > 0) {
+                dispatchSyntheticPointer('pointerdown', touch.clientX, touch.clientY);
+            } else {
+                // Si no toca el gizmo, intentar hit-test para colocar (en el render loop)
+                tryPlaceFromTouch = true;
+            }
+        }
+
+        function onTouchMove(event) {
+            if (!renderer.xr.isPresenting) return;
+            if (touchId === null) return;
+            event.preventDefault();
+
+            const touch = findTouch(event.touches, touchId);
+            if (!touch) return;
+
+            dispatchSyntheticPointer('pointermove', touch.clientX, touch.clientY);
+        }
+
+        function onTouchEnd(event) {
+            if (!renderer.xr.isPresenting) return;
+            if (touchId === null) return;
+            event.preventDefault();
+
+            const touch = findTouch(event.changedTouches, touchId);
+            if (!touch) return;
+
+            dispatchSyntheticPointer('pointerup', touch.clientX, touch.clientY);
+            touchId = null;
+            tryPlaceFromTouch = false;
+        }
+
+        function findTouch(touchList, id) {
+            for (let i = 0; i < touchList.length; i++) {
+                if (touchList[i].identifier === id) return touchList[i];
+            }
+            return null;
+        }
+
+        function updateMouseFromTouch(touch) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
+        }
+
+        function dispatchSyntheticPointer(type, clientX, clientY) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            const evt = new PointerEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                pointerId: 1,
+                pointerType: 'touch',
+                clientX: clientX,
+                clientY: clientY,
+                button: 0,
+                buttons: (type === 'pointerdown' || type === 'pointermove') ? 1 : 0,
+                isPrimary: true
+            });
+            renderer.domElement.dispatchEvent(evt);
+        }
+
+        // ─── VARIABLE PARA HIT-TEST DESDE TOUCH ───
+        let tryPlaceFromTouch = false;
 
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
@@ -242,6 +354,27 @@
             updateStatus();
         }
 
+        // ─── COLOCAR OBJETO EN SUPERFICIE REAL (Hit-Test) ───
+        function tryPlaceOnSurface(frame, referenceSpace) {
+            if (!hitTestSource || !frame) return false;
+
+            const hitTestResults = frame.getHitTestResults(hitTestSource);
+            if (hitTestResults.length > 0) {
+                const hit = hitTestResults[0];
+                const pose = hit.getPose(referenceSpace);
+                if (pose) {
+                    trophyContainer.position.set(
+                        pose.transform.position.x,
+                        pose.transform.position.y + 0.2,
+                        pose.transform.position.z
+                    );
+                    trophyContainer.rotation.set(0, 0, 0);
+                    return true;
+                }
+            }
+            return false;
+        }
+
         function readDepthFromFrame(frame) {
             if (!frame) return;
             const session = renderer.xr.getSession();
@@ -271,6 +404,15 @@
 
         function render(time, frame) {
             const elapsedTime = clock.getElapsedTime();
+            const refSpace = renderer.xr.getReferenceSpace();
+
+            // Hit-test para colocacion desde touch (cuando no se toco el gizmo)
+            if (tryPlaceFromTouch && frame && refSpace) {
+                if (tryPlaceOnSurface(frame, refSpace)) {
+                    tryPlaceFromTouch = false;
+                }
+            }
+
             readDepthFromFrame(frame);
 
             if (trophyContainer && !transformControls.dragging) {
@@ -289,5 +431,3 @@
     </script>
 </body>
 </html>
-	
-	
