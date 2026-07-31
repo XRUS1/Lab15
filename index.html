@@ -5,11 +5,36 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; background-color: #000; color: #fff; font-family: sans-serif; overflow: hidden; touch-action: none; }
-        #info { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 100; pointer-events: none; font-size: 14px; text-shadow: 1px 1px 2px #000; }
-        a { color: #4af; text-decoration: none; }
-        #status { position: absolute; bottom: 10px; width: 100%; text-align: center; color: #0f0; font-family: monospace; font-size: 13px; pointer-events: none; text-shadow: 1px 1px 2px #000; z-index: 100; }
-        #controls-help { position: absolute; top: 40px; left: 10px; color: #fff; font-family: monospace; font-size: 11px; pointer-events: none; text-shadow: 1px 1px 2px #000; z-index: 100; background: rgba(0,0,0,0.4); padding: 8px; border-radius: 4px; }
+        body {
+            margin: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: sans-serif;
+            overflow: hidden;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            z-index: 100;
+            pointer-events: none;
+        }
+        a {
+            color: #4af;
+            text-decoration: none;
+        }
+        #status {
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            text-align: center;
+            color: #0f0;
+            font-family: monospace;
+            font-size: 13px;
+            pointer-events: none;
+            z-index: 100;
+        }
     </style>
 </head>
 <body>
@@ -17,15 +42,6 @@
     <div id="info">
         <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - dragging trophy with finger
     </div>
-
-    <div id="controls-help">
-        â”Œâ”€â”€ Touch Controls â”€â”€â”<br>
-        â”‚ Tap axis  : Grab   â”‚<br>
-        â”‚ Drag      : Move   â”‚<br>
-        â”‚ Tap floor : Place  â”‚<br>
-        â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-    </div>
-
     <div id="status">Iniciando...</div>
 
     <script type="importmap">
@@ -47,23 +63,27 @@
 
         let container;
         let camera, scene, renderer;
-        let controls, transformControls;
-        let group, trophyContainer;
-        let hitTestSource = null;
-        let hitTestSourceRequested = false;
-        const clock = new THREE.Clock();
-        const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2();
-
+        let controller1;
         let isDepthSupplied = false;
-        const statusEl = document.getElementById('status');
+        let raycaster;
+        let transformControls;
+        let trophyContainer;
+
+        const intersected = [];
+        const tempMatrix = new THREE.Matrix4();
+        const clock = new THREE.Clock();
+
+        let controls, group;
+
+        // â”€â”€â”€ Para puente tÃ¡ctil â”€â”€â”€
         let touchId = null;
-        let tryPlaceFromTouch = false;
+        let isPointerDown = false;
 
         init();
         animate();
 
         function init() {
+
             container = document.createElement('div');
             document.body.appendChild(container);
 
@@ -82,7 +102,6 @@
             const floor = new THREE.Mesh(floorGeometry, floorMaterial);
             floor.rotation.x = -Math.PI / 2;
             floor.receiveShadow = true;
-            floor.name = 'floor';
             scene.add(floor);
 
             scene.add(new THREE.HemisphereLight(0xbcbcbc, 0xa5a5a5, 3));
@@ -100,9 +119,10 @@
             group = new THREE.Group();
             scene.add(group);
 
+            // --- CUBO PADRE: invisible, para raycasting y drag ---
             const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-            const hitMaterial = new THREE.MeshBasicMaterial({
-                transparent: true,
+            const hitMaterial = new THREE.MeshBasicMaterial({ 
+                transparent: true, 
                 opacity: 0.0,
                 depthWrite: false,
                 depthTest: false
@@ -113,19 +133,25 @@
             trophyContainer.renderOrder = -1;
             group.add(trophyContainer);
 
+            // --- CARGAR TROFEO GLB ---
             const loader = new GLTFLoader();
             loader.load('./models/gltf/Trophy.glb', function (gltf) {
+
                 const trophyModel = gltf.scene;
+
                 trophyModel.traverse(function (child) {
                     if (child.isMesh) {
                         child.castShadow = true;
                         child.receiveShadow = true;
                     }
                 });
+
                 trophyModel.scale.set(1.8, 1.8, 1.8);
                 trophyModel.position.set(0, 0, 0);
                 trophyModel.name = "animatedItem";
+
                 trophyContainer.add(trophyModel);
+
             }, undefined, function (error) {
                 console.error('Error al cargar el trofeo:', error);
             });
@@ -137,16 +163,13 @@
             renderer.xr.enabled = true;
             container.appendChild(renderer.domElement);
 
-            // Boton XR - igual que Lab12 original
+            // â”€â”€â”€ BOTON XR: EXACTAMENTE COMO LAB12 â”€â”€â”€
             document.body.appendChild(XRButton.createButton(renderer, {
                 'optionalFeatures': ['depth-sensing'],
-                'depthSensing': {
-                    'usagePreference': ['gpu-optimized', 'cpu-optimized'],
-                    'dataFormatPreference': ['luminance-alpha', 'float32']
-                }
+                'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
             }));
 
-            // â”€â”€â”€ TRANSFORM CONTROLS â”€â”€â”€
+            // â”€â”€â”€ TRANSFORM CONTROLS (aÃ±adido al Lab12) â”€â”€â”€
             transformControls = new TransformControls(camera, renderer.domElement);
             transformControls.attach(trophyContainer);
             transformControls.setSize(0.75);
@@ -160,36 +183,36 @@
                 controls.enabled = !event.value;
             });
 
+            // Reset rotacion al soltar
             transformControls.addEventListener('change', function () {
                 if (!transformControls.dragging) {
                     trophyContainer.rotation.set(0, 0, 0);
                 }
             });
 
-            // â”€â”€â”€ PUENTE TACTIL: capturar toques en document y reenviar como PointerEvents â”€â”€â”€
+            // â”€â”€â”€ PUENTE TACTIL: solo en AR â”€â”€â”€
             document.addEventListener('touchstart', onTouchStart, { passive: false });
             document.addEventListener('touchmove', onTouchMove, { passive: false });
             document.addEventListener('touchend', onTouchEnd, { passive: false });
             document.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
-            window.addEventListener('resize', onWindowResize);
+            // â”€â”€â”€ CONTROLADOR VR (del Lab12 original, mantenido) â”€â”€â”€
+            controller1 = renderer.xr.getController(0);
+            controller1.addEventListener('selectstart', onSelectStart);
+            controller1.addEventListener('selectend', onSelectEnd);
+            scene.add(controller1);
 
-            // Hit-test source para colocacion
-            renderer.xr.addEventListener('sessionstart', function () {
-                const session = renderer.xr.getSession();
-                if (!hitTestSourceRequested) {
-                    session.requestReferenceSpace('viewer').then(function (refSpace) {
-                        session.requestHitTestSource({ space: refSpace }).then(function (source) {
-                            hitTestSource = source;
-                        });
-                    });
-                    session.addEventListener('end', function () {
-                        hitTestSourceRequested = false;
-                        hitTestSource = null;
-                    });
-                    hitTestSourceRequested = true;
-                }
-            });
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(0, 0, -1)
+            ]);
+            const line = new THREE.Line(lineGeometry);
+            line.name = 'line';
+            line.scale.z = 5;
+            controller1.add(line);
+
+            raycaster = new THREE.Raycaster();
+            window.addEventListener('resize', onWindowResize);
         }
 
         function onWindowResize() {
@@ -202,144 +225,171 @@
         function onTouchStart(event) {
             if (!renderer.xr.isPresenting) return;
             if (event.touches.length !== 1) return;
-            event.preventDefault();
 
             const touch = event.touches[0];
             touchId = touch.identifier;
 
-            updateMouseFromTouch(touch);
-            raycaster.setFromCamera(mouse, camera);
+            const rect = renderer.domElement.getBoundingClientRect();
+            const x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
+            const y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
 
-            const gizmoIntersects = raycaster.intersectObjects(transformControls.children, true);
-            if (gizmoIntersects.length > 0) {
-                dispatchSyntheticPointer('pointerdown', touch.clientX, touch.clientY);
-            } else {
-                tryPlaceFromTouch = true;
+            raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+            const gizmoHits = raycaster.intersectObjects(transformControls.children, true);
+
+            if (gizmoHits.length > 0) {
+                event.preventDefault();
+                isPointerDown = true;
+                dispatchPointer('pointerdown', touch.clientX, touch.clientY);
             }
         }
 
         function onTouchMove(event) {
-            if (!renderer.xr.isPresenting) return;
-            if (touchId === null) return;
-            event.preventDefault();
+            if (!renderer.xr.isPresenting || touchId === null) return;
 
-            const touch = findTouch(event.touches, touchId);
+            let touch = null;
+            for (let i = 0; i < event.touches.length; i++) {
+                if (event.touches[i].identifier === touchId) {
+                    touch = event.touches[i];
+                    break;
+                }
+            }
             if (!touch) return;
-            dispatchSyntheticPointer('pointermove', touch.clientX, touch.clientY);
+
+            event.preventDefault();
+            dispatchPointer('pointermove', touch.clientX, touch.clientY);
         }
 
         function onTouchEnd(event) {
-            if (!renderer.xr.isPresenting) return;
-            if (touchId === null) return;
-            event.preventDefault();
+            if (!renderer.xr.isPresenting || touchId === null) return;
 
-            const touch = findTouch(event.changedTouches, touchId);
+            let touch = null;
+            for (let i = 0; i < event.changedTouches.length; i++) {
+                if (event.changedTouches[i].identifier === touchId) {
+                    touch = event.changedTouches[i];
+                    break;
+                }
+            }
             if (!touch) return;
 
-            dispatchSyntheticPointer('pointerup', touch.clientX, touch.clientY);
+            event.preventDefault();
+            isPointerDown = false;
+            dispatchPointer('pointerup', touch.clientX, touch.clientY);
             touchId = null;
-            tryPlaceFromTouch = false;
         }
 
-        function findTouch(touchList, id) {
-            for (let i = 0; i < touchList.length; i++) {
-                if (touchList[i].identifier === id) return touchList[i];
-            }
-            return null;
-        }
-
-        function updateMouseFromTouch(touch) {
+        function dispatchPointer(type, cx, cy) {
             const rect = renderer.domElement.getBoundingClientRect();
-            mouse.x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
-            mouse.y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
-        }
-
-        function dispatchSyntheticPointer(type, clientX, clientY) {
-            const rect = renderer.domElement.getBoundingClientRect();
-            const evt = new PointerEvent(type, {
+            renderer.domElement.dispatchEvent(new PointerEvent(type, {
                 bubbles: true,
                 cancelable: true,
                 pointerId: 1,
                 pointerType: 'touch',
-                clientX: clientX,
-                clientY: clientY,
+                clientX: cx,
+                clientY: cy,
                 button: 0,
-                buttons: (type === 'pointerdown' || type === 'pointermove') ? 1 : 0,
+                buttons: isPointerDown ? 1 : 0,
                 isPrimary: true
-            });
-            renderer.domElement.dispatchEvent(evt);
+            }));
         }
 
-        // â”€â”€â”€ COLOCAR EN SUPERFICIE REAL â”€â”€â”€
-        function tryPlaceOnSurface(frame, referenceSpace) {
-            if (!hitTestSource || !frame) return false;
-            const hitTestResults = frame.getHitTestResults(hitTestSource);
-            if (hitTestResults.length > 0) {
-                const hit = hitTestResults[0];
-                const pose = hit.getPose(referenceSpace);
-                if (pose) {
-                    trophyContainer.position.set(
-                        pose.transform.position.x,
-                        pose.transform.position.y + 0.2,
-                        pose.transform.position.z
-                    );
-                    trophyContainer.rotation.set(0, 0, 0);
-                    return true;
-                }
+        // â”€â”€â”€ CONTROLADOR VR (del Lab12) â”€â”€â”€
+        function onSelectStart(event) {
+            const controller = event.target;
+            const intersections = getIntersections(controller);
+
+            if (intersections.length > 0) {
+                const intersection = intersections[0];
+                const object = intersection.object;
+                object.material.opacity = 0.3;
+                object.material.color = new THREE.Color(0xffaa00);
+                controller.attach(object);
+                controller.userData.selected = object;
             }
-            return false;
+            controller.userData.targetRayMode = event.data.targetRayMode;
         }
 
-        function readDepthFromFrame(frame) {
-            if (!frame) return;
-            const session = renderer.xr.getSession();
-            const refSpace = renderer.xr.getReferenceSpace();
-            if (!session || !refSpace) return;
-            try {
-                const viewerPose = frame.getViewerPose(refSpace);
-                if (!viewerPose) return;
-                for (const view of viewerPose.views) {
-                    const depthInfo = frame.getDepthInformation(view);
-                    isDepthSupplied = !!depthInfo;
-                }
-            } catch (e) {
-                isDepthSupplied = false;
+        function onSelectEnd(event) {
+            const controller = event.target;
+
+            if (controller.userData.selected !== undefined) {
+                const object = controller.userData.selected;
+                object.material.opacity = 0.0;
+                group.attach(object);
+                object.rotation.set(0, 0, 0);
+                controller.userData.selected = undefined;
             }
         }
 
-        function updateStatus() {
-            const depth = isDepthSupplied ? 'ON' : 'OFF';
-            const ar = renderer.xr.isPresenting ? 'AR ACTIVO' : 'AR INACTIVO';
-            statusEl.innerHTML = 'Modo: TRANSLATE | Depth: ' + depth + ' | ' + ar;
+        function getIntersections(controller) {
+            controller.updateMatrixWorld();
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+            return raycaster.intersectObjects(group.children, false);
+        }
+
+        function intersectObjects(controller) {
+            if (controller.userData.targetRayMode === 'screen') return;
+            if (controller.userData.selected !== undefined) return;
+
+            const line = controller.getObjectByName('line');
+            const intersections = getIntersections(controller);
+
+            if (intersections.length > 0) {
+                const intersection = intersections[0];
+                const object = intersection.object;
+                object.material.opacity = 0.15;
+                object.material.color = new THREE.Color(0xffff00);
+                intersected.push(object);
+                if (line) line.scale.z = intersection.distance;
+            } else {
+                if (line) line.scale.z = 5;
+            }
+        }
+
+        function cleanIntersected() {
+            while (intersected.length) {
+                const object = intersected.pop();
+                if (controller1.userData.selected !== object) {
+                    object.material.opacity = 0.0;
+                }
+            }
         }
 
         function animate() {
             renderer.setAnimationLoop(render);
         }
 
-        function render(time, frame) {
+        function render() {
             const elapsedTime = clock.getElapsedTime();
 
-            // Hit-test para colocacion desde touch
-            if (tryPlaceFromTouch && frame) {
-                const refSpace = renderer.xr.getReferenceSpace();
-                if (refSpace && tryPlaceOnSurface(frame, refSpace)) {
-                    tryPlaceFromTouch = false;
-                }
-            }
+            group.rotation.set(0, 0, 0);
 
-            readDepthFromFrame(frame);
-
-            // Animacion del trofeo
-            if (trophyContainer && !transformControls.dragging) {
-                const model = trophyContainer.getObjectByName("animatedItem");
+            // AnimaciÃ³n del trofeo
+            group.children.forEach(cubeContainer => {
+                const model = cubeContainer.getObjectByName("animatedItem");
                 if (model) {
                     model.rotation.y = elapsedTime * 1.5;
                     model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
                 }
+            });
+
+            // Depth sensing
+            if (renderer.xr.hasDepthSensing() && !isDepthSupplied) {
+                isDepthSupplied = true;
+                console.log('Depth sensing disponible');
+            } else if (!renderer.xr.hasDepthSensing() && isDepthSupplied) {
+                isDepthSupplied = false;
             }
 
-            if (Math.floor(elapsedTime * 60) % 10 === 0) updateStatus();
+            cleanIntersected();
+            intersectObjects(controller1);
+
+            // Status
+            const statusEl = document.getElementById('status');
+            if (statusEl) {
+                statusEl.innerHTML = 'Modo: TRANSLATE | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF') + ' | ' + (renderer.xr.isPresenting ? 'AR ACTIVO' : 'AR INACTIVO');
+            }
 
             controls.update();
             renderer.render(scene, camera);
