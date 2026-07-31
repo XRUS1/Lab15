@@ -13,7 +13,11 @@
     </style>
 </head>
 <body>
-    <div id="info"><a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - dragging trophy with finger</div>
+
+    <div id="info">
+        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - dragging trophy with finger
+    </div>
+
     <div id="controls-help">
         ┌── Touch Controls ──┐<br>
         │ Tap axis  : Grab   │<br>
@@ -21,213 +25,374 @@
         │ Tap floor : Place  │<br>
         └────────────────────┘
     </div>
+
     <div id="status">Iniciando...</div>
+
     <script type="importmap">
-        { "imports": { "three": "./build/three.module.js", "three/addons/": "./jsm/" } }
+        {
+            "imports": {
+                "three": "./build/three.module.js",
+                "three/addons/": "./jsm/"
+            }
+        }
     </script>
+
     <script type="module">
+
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { TransformControls } from 'three/addons/controls/TransformControls.js';
         import { XRButton } from 'three/addons/webxr/XRButton.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-        let container, camera, scene, renderer, controls, transformControls;
-        let group, trophyContainer, hitTestSource = null, hitTestSourceRequested = false;
-        const clock = new THREE.Clock(), raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
-        let isDepthSupplied = false, statusEl = document.getElementById('status');
-        let touchId = null, tryPlaceFromTouch = false, isARActive = false;
+        let container;
+        let camera, scene, renderer;
+        let controls, transformControls;
+        let group, trophyContainer;
+        let hitTestSource = null;
+        let hitTestSourceRequested = false;
+        const clock = new THREE.Clock();
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
 
-        init(); animate();
+        let isDepthSupplied = false;
+        const statusEl = document.getElementById('status');
+
+        // ─── Estado del puente táctil ───
+        let touchId = null;
+        let tryPlaceFromTouch = false;
+        let isARActive = false;
+
+        init();
+        animate();
 
         function init() {
-            container = document.createElement('div'); document.body.appendChild(container);
-            scene = new THREE.Scene(); scene.background = new THREE.Color(0x808080);
+            container = document.createElement('div');
+            document.body.appendChild(container);
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x808080);
+
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10);
             camera.position.set(0, 1.6, 3);
-            controls = new OrbitControls(camera, container); controls.target.set(0, 1.6, 0); controls.update();
 
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(6,6), new THREE.ShadowMaterial({opacity:0.25, blending:THREE.CustomBlending, transparent:false}));
-            floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; floor.name = 'floor'; scene.add(floor);
+            controls = new OrbitControls(camera, container);
+            controls.target.set(0, 1.6, 0);
+            controls.update();
+
+            const floorGeometry = new THREE.PlaneGeometry(6, 6);
+            const floorMaterial = new THREE.ShadowMaterial({ opacity: 0.25, blending: THREE.CustomBlending, transparent: false });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            floor.name = 'floor';
+            scene.add(floor);
+
             scene.add(new THREE.HemisphereLight(0xbcbcbc, 0xa5a5a5, 3));
-            const light = new THREE.DirectionalLight(0xffffff, 3); light.position.set(0,6,0); light.castShadow = true;
-            light.shadow.camera.top = 3; light.shadow.camera.bottom = -3; light.shadow.camera.right = 3; light.shadow.camera.left = -3;
-            light.shadow.mapSize.set(4096,4096); scene.add(light);
 
-            group = new THREE.Group(); scene.add(group);
-            const geometry = new THREE.BoxGeometry(0.4,0.4,0.4);
-            const hitMaterial = new THREE.MeshBasicMaterial({transparent:true, opacity:0.0, depthWrite:false, depthTest:false});
+            const light = new THREE.DirectionalLight(0xffffff, 3);
+            light.position.set(0, 6, 0);
+            light.castShadow = true;
+            light.shadow.camera.top = 3;
+            light.shadow.camera.bottom = -3;
+            light.shadow.camera.right = 3;
+            light.shadow.camera.left = -3;
+            light.shadow.mapSize.set(4096, 4096);
+            scene.add(light);
+
+            group = new THREE.Group();
+            scene.add(group);
+
+            // ─── CUBO PADRE: hitbox invisible ───
+            const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+            const hitMaterial = new THREE.MeshBasicMaterial({
+                transparent: true,
+                opacity: 0.0,
+                depthWrite: false,
+                depthTest: false
+            });
             trophyContainer = new THREE.Mesh(geometry, hitMaterial);
-            trophyContainer.position.set(0, 1.0, -1.5); trophyContainer.name = "trophyContainer"; trophyContainer.renderOrder = -1;
+            trophyContainer.position.set(0, 1.0, -1.5);
+            trophyContainer.name = "trophyContainer";
+            trophyContainer.renderOrder = -1;
             group.add(trophyContainer);
 
-            new GLTFLoader().load('./models/gltf/Trophy.glb', function(gltf){
+            // ─── CARGAR TROFEO GLB ───
+            const loader = new GLTFLoader();
+            loader.load('./models/gltf/Trophy.glb', function (gltf) {
                 const trophyModel = gltf.scene;
-                trophyModel.traverse(c => { if(c.isMesh){ c.castShadow = true; c.receiveShadow = true; } });
-                trophyModel.scale.set(1.8,1.8,1.8); trophyModel.position.set(0,0,0); trophyModel.name = "animatedItem";
+                trophyModel.traverse(function (child) {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+                trophyModel.scale.set(1.8, 1.8, 1.8);
+                trophyModel.position.set(0, 0, 0);
+                trophyModel.name = "animatedItem";
                 trophyContainer.add(trophyModel);
-            }, undefined, e => console.error('Error:', e));
+            }, undefined, function (error) {
+                console.error('Error al cargar el trofeo:', error);
+            });
 
-            renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
-            renderer.setPixelRatio(window.devicePixelRatio); renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true; renderer.xr.enabled = true; container.appendChild(renderer.domElement);
+            // ─── RENDERER + WEBXR ───
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.xr.enabled = true;
+            container.appendChild(renderer.domElement);
 
+            // Hit-test como OPTIONAL (no bloquea si no está disponible)
             document.body.appendChild(XRButton.createButton(renderer, {
-                'requiredFeatures': ['hit-test'],
-                'optionalFeatures': ['depth-sensing'],
-                'depthSensing': { 'usagePreference': ['gpu-optimized','cpu-optimized'], 'dataFormatPreference': ['luminance-alpha','float32'] }
+                'optionalFeatures': ['hit-test', 'depth-sensing'],
+                'depthSensing': {
+                    'usagePreference': ['gpu-optimized', 'cpu-optimized'],
+                    'dataFormatPreference': ['luminance-alpha', 'float32']
+                }
             }));
 
             // ─── TRANSFORM CONTROLS ───
             transformControls = new TransformControls(camera, renderer.domElement);
-            transformControls.attach(trophyContainer); transformControls.setSize(1.5);
-            transformControls.setMode('translate'); transformControls.showX = true; transformControls.showY = true; transformControls.showZ = true;
+            transformControls.attach(trophyContainer);
+            transformControls.setSize(1.5);
+            transformControls.setMode('translate');
+            transformControls.showX = true;
+            transformControls.showY = true;
+            transformControls.showZ = true;
             scene.add(transformControls);
 
-            // Gizmo visible en AR (sin depth test, renderOrder alto)
-            transformControls.traverse(child => {
-                if(child.isMesh || child.isLine){
-                    if(child.material){
-                        if(Array.isArray(child.material)){
-                            child.material.forEach(m => { m.depthTest = false; m.depthWrite = false; if(m.linewidth) m.linewidth = 4; });
+            // Hacer gizmo visible sobre video de cámara
+            transformControls.traverse(function (child) {
+                if (child.isMesh || child.isLine) {
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(function (m) {
+                                m.depthTest = false;
+                                m.depthWrite = false;
+                            });
                         } else {
-                            child.material.depthTest = false; child.material.depthWrite = false;
-                            if(child.material.linewidth) child.material.linewidth = 4;
+                            child.material.depthTest = false;
+                            child.material.depthWrite = false;
                         }
                     }
                     child.renderOrder = 1000;
                 }
             });
 
-            transformControls.addEventListener('dragging-changed', e => { controls.enabled = !e.value; });
-            transformControls.addEventListener('change', () => { if(!transformControls.dragging) trophyContainer.rotation.set(0,0,0); });
+            // Desactivar OrbitControls mientras se arrastra
+            transformControls.addEventListener('dragging-changed', function (event) {
+                controls.enabled = !event.value;
+            });
 
-            // ─── PUENTE TACTIL ───
-            document.addEventListener('touchstart', onTouchStart, {passive:false});
-            document.addEventListener('touchmove', onTouchMove, {passive:false});
-            document.addEventListener('touchend', onTouchEnd, {passive:false});
-            document.addEventListener('touchcancel', onTouchEnd, {passive:false});
+            // Reset rotación al soltar
+            transformControls.addEventListener('change', function () {
+                if (!transformControls.dragging) {
+                    trophyContainer.rotation.set(0, 0, 0);
+                }
+            });
+
+            // ─── PUENTE TÁCTIL ───
+            document.addEventListener('touchstart', onTouchStart, { passive: false });
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
+            document.addEventListener('touchend', onTouchEnd, { passive: false });
+            document.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
             window.addEventListener('resize', onWindowResize);
+
             renderer.xr.addEventListener('sessionstart', onARSessionStart);
             renderer.xr.addEventListener('sessionend', onARSessionEnd);
         }
 
-        function onWindowResize(){
-            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function onARSessionStart(){
-            isARActive = true; controls.enabled = false; scene.background = null;
-            // Colocar trofeo 1 metro frente a la camara
-            const camDir = new THREE.Vector3(); camera.getWorldDirection(camDir);
-            const camPos = new THREE.Vector3(); camera.getWorldPosition(camPos);
-            trophyContainer.position.copy(camPos).add(camDir.multiplyScalar(1.0));
-            trophyContainer.position.y = Math.max(0.3, trophyContainer.position.y);
-            trophyContainer.rotation.set(0,0,0);
+        function onARSessionStart() {
+            isARActive = true;
+            controls.enabled = false;
+            scene.background = null; // Fondo transparente para passthrough
+
+            // NO movemos el objeto. Se queda en (0, 1.0, -1.5) como en Lab12 original.
+            // ARCore coloca la cámara del teléfono en el origen mirando a -Z,
+            // así que el objeto en (0, 1.0, -1.5) debería estar visible frente al usuario.
 
             const session = renderer.xr.getSession();
-            if(!hitTestSourceRequested){
-                session.requestReferenceSpace('viewer').then(refSpace => {
-                    session.requestHitTestSource({space:refSpace}).then(source => { hitTestSource = source; });
+            if (!hitTestSourceRequested) {
+                session.requestReferenceSpace('viewer').then(function (refSpace) {
+                    session.requestHitTestSource({ space: refSpace }).then(function (source) {
+                        hitTestSource = source;
+                    });
                 });
-                session.addEventListener('end', () => { hitTestSourceRequested = false; hitTestSource = null; });
+                session.addEventListener('end', function () {
+                    hitTestSourceRequested = false;
+                    hitTestSource = null;
+                });
                 hitTestSourceRequested = true;
             }
             updateStatus();
         }
 
-        function onARSessionEnd(){
-            isARActive = false; controls.enabled = true; scene.background = new THREE.Color(0x808080); updateStatus();
+        function onARSessionEnd() {
+            isARActive = false;
+            controls.enabled = true;
+            scene.background = new THREE.Color(0x808080);
+            updateStatus();
         }
 
-        // ─── TOUCH -> POINTEREVENT SINTETICO ───
-        function onTouchStart(e){
-            if(!isARActive || e.touches.length !== 1) return; e.preventDefault();
-            const touch = e.touches[0]; touchId = touch.identifier;
-            updateMouseFromTouch(touch); raycaster.setFromCamera(mouse, camera);
-            const gizmoHits = raycaster.intersectObjects(transformControls.children, true);
-            if(gizmoHits.length > 0) dispatchSyntheticPointer('pointerdown', touch.clientX, touch.clientY);
-            else tryPlaceFromTouch = true;
-        }
-        function onTouchMove(e){
-            if(!isARActive || touchId === null) return; e.preventDefault();
-            const touch = findTouch(e.touches, touchId);
-            if(touch) dispatchSyntheticPointer('pointermove', touch.clientX, touch.clientY);
-        }
-        function onTouchEnd(e){
-            if(!isARActive || touchId === null) return; e.preventDefault();
-            const touch = findTouch(e.changedTouches, touchId);
-            if(touch) dispatchSyntheticPointer('pointerup', touch.clientX, touch.clientY);
-            touchId = null; tryPlaceFromTouch = false;
-        }
-        function findTouch(list, id){ for(let i=0;i<list.length;i++) if(list[i].identifier===id) return list[i]; return null; }
-        function updateMouseFromTouch(touch){
-            const rect = renderer.domElement.getBoundingClientRect();
-            mouse.x = ((touch.clientX - rect.left)/rect.width)*2 - 1;
-            mouse.y = -((touch.clientY - rect.top)/rect.height)*2 + 1;
-        }
-        function dispatchSyntheticPointer(type, cx, cy){
-            const rect = renderer.domElement.getBoundingClientRect();
-            renderer.domElement.dispatchEvent(new PointerEvent(type, {
-                bubbles:true, cancelable:true, pointerId:1, pointerType:'touch',
-                clientX:cx, clientY:cy, button:0,
-                buttons: (type==='pointerdown'||type==='pointermove')?1:0, isPrimary:true
-            }));
+        // ─── PUENTE TÁCTIL: TOUCH → POINTEREVENT SINTÉTICO ───
+        function onTouchStart(event) {
+            if (!isARActive) return;
+            if (event.touches.length !== 1) return;
+            event.preventDefault();
+
+            const touch = event.touches[0];
+            touchId = touch.identifier;
+
+            updateMouseFromTouch(touch);
+            raycaster.setFromCamera(mouse, camera);
+
+            const gizmoIntersects = raycaster.intersectObjects(transformControls.children, true);
+            if (gizmoIntersects.length > 0) {
+                dispatchSyntheticPointer('pointerdown', touch.clientX, touch.clientY);
+            } else {
+                tryPlaceFromTouch = true;
+            }
         }
 
-        // ─── HIT-TEST ───
-        function tryPlaceOnSurface(frame, refSpace){
-            if(!hitTestSource || !frame) return false;
-            const results = frame.getHitTestResults(hitTestSource);
-            if(results.length > 0){
-                const pose = results[0].getPose(refSpace);
-                if(pose){
-                    trophyContainer.position.set(pose.transform.position.x, pose.transform.position.y + 0.2, pose.transform.position.z);
-                    trophyContainer.rotation.set(0,0,0); return true;
+        function onTouchMove(event) {
+            if (!isARActive) return;
+            if (touchId === null) return;
+            event.preventDefault();
+
+            const touch = findTouch(event.touches, touchId);
+            if (!touch) return;
+
+            dispatchSyntheticPointer('pointermove', touch.clientX, touch.clientY);
+        }
+
+        function onTouchEnd(event) {
+            if (!isARActive) return;
+            if (touchId === null) return;
+            event.preventDefault();
+
+            const touch = findTouch(event.changedTouches, touchId);
+            if (!touch) return;
+
+            dispatchSyntheticPointer('pointerup', touch.clientX, touch.clientY);
+            touchId = null;
+            tryPlaceFromTouch = false;
+        }
+
+        function findTouch(touchList, id) {
+            for (let i = 0; i < touchList.length; i++) {
+                if (touchList[i].identifier === id) return touchList[i];
+            }
+            return null;
+        }
+
+        function updateMouseFromTouch(touch) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
+        }
+
+        function dispatchSyntheticPointer(type, clientX, clientY) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            const evt = new PointerEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                pointerId: 1,
+                pointerType: 'touch',
+                clientX: clientX,
+                clientY: clientY,
+                button: 0,
+                buttons: (type === 'pointerdown' || type === 'pointermove') ? 1 : 0,
+                isPrimary: true
+            });
+            renderer.domElement.dispatchEvent(evt);
+        }
+
+        // ─── COLOCAR OBJETO EN SUPERFICIE REAL ───
+        function tryPlaceOnSurface(frame, referenceSpace) {
+            if (!hitTestSource || !frame) return false;
+
+            const hitTestResults = frame.getHitTestResults(hitTestSource);
+            if (hitTestResults.length > 0) {
+                const hit = hitTestResults[0];
+                const pose = hit.getPose(referenceSpace);
+                if (pose) {
+                    trophyContainer.position.set(
+                        pose.transform.position.x,
+                        pose.transform.position.y + 0.2,
+                        pose.transform.position.z
+                    );
+                    trophyContainer.rotation.set(0, 0, 0);
+                    return true;
                 }
             }
             return false;
         }
 
-        function readDepthFromFrame(frame){
-            if(!frame) return;
-            const session = renderer.xr.getSession(), refSpace = renderer.xr.getReferenceSpace();
-            if(!session || !refSpace) return;
-            try{
+        function readDepthFromFrame(frame) {
+            if (!frame) return;
+            const session = renderer.xr.getSession();
+            const refSpace = renderer.xr.getReferenceSpace();
+            if (!session || !refSpace) return;
+            try {
                 const viewerPose = frame.getViewerPose(refSpace);
-                if(!viewerPose) return;
-                for(const view of viewerPose.views){
+                if (!viewerPose) return;
+                for (const view of viewerPose.views) {
                     const depthInfo = frame.getDepthInformation(view);
                     isDepthSupplied = !!depthInfo;
                 }
-            } catch(e){ isDepthSupplied = false; }
+            } catch (e) {
+                isDepthSupplied = false;
+            }
         }
 
-        function updateStatus(){
-            statusEl.innerHTML = `Modo: TRANSLATE | Depth: ${isDepthSupplied?'ON':'OFF'} | ${isARActive?'AR ACTIVO':'AR INACTIVO'}`;
+        function updateStatus() {
+            const depth = isDepthSupplied ? 'ON' : 'OFF';
+            const ar = isARActive ? 'AR ACTIVO' : 'AR INACTIVO';
+            statusEl.innerHTML = 'Modo: TRANSLATE | Depth: ' + depth + ' | ' + ar;
         }
 
-        function animate(){ renderer.setAnimationLoop(render); }
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
 
-        function render(time, frame){
+        function render(time, frame) {
             const elapsedTime = clock.getElapsedTime();
-            if(isARActive){
+
+            if (isARActive) {
                 const refSpace = renderer.xr.getReferenceSpace();
-                if(tryPlaceFromTouch && frame && refSpace){
-                    if(tryPlaceOnSurface(frame, refSpace)) tryPlaceFromTouch = false;
+
+                if (tryPlaceFromTouch && frame && refSpace) {
+                    if (tryPlaceOnSurface(frame, refSpace)) {
+                        tryPlaceFromTouch = false;
+                    }
                 }
+
                 readDepthFromFrame(frame);
             }
-            if(trophyContainer && !transformControls.dragging){
+
+            // Animación del trofeo (solo cuando NO se está arrastrando)
+            if (trophyContainer && !transformControls.dragging) {
                 const model = trophyContainer.getObjectByName("animatedItem");
-                if(model){ model.rotation.y = elapsedTime * 1.5; model.position.y = Math.sin(elapsedTime * 2.5) * 0.03; }
+                if (model) {
+                    model.rotation.y = elapsedTime * 1.5;
+                    model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
+                }
             }
-            if(Math.floor(elapsedTime * 60) % 10 === 0) updateStatus();
-            if(!isARActive) controls.update();
+
+            if (Math.floor(elapsedTime * 60) % 10 === 0) updateStatus();
+
+            controls.update();
             renderer.render(scene, camera);
         }
+
     </script>
 </body>
 </html>
