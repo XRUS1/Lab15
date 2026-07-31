@@ -57,7 +57,6 @@
 
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { TransformControls } from 'three/addons/controls/TransformControls.js';
         import { XRButton } from 'three/addons/webxr/XRButton.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -66,9 +65,9 @@
         let controller1;
         let isDepthSupplied = false;
         let raycaster;
-        let transformControls;
         let trophyContainer;
-        let tcActive = false;
+        let transformControls = null;
+        let tcReady = false;
 
         const intersected = [];
         const tempMatrix = new THREE.Matrix4();
@@ -160,7 +159,7 @@
             renderer.xr.enabled = true;
             container.appendChild(renderer.domElement);
 
-            // --- BOTON XR (igual que Lab12) ---
+            // --- BOTON XR (exactamente como Lab12) ---
             const sessionInit = {
                 optionalFeatures: ['depth-sensing'],
                 depthSensing: {
@@ -168,27 +167,9 @@
                     dataFormatPreference: ['luminance-alpha']
                 }
             };
-            document.body.appendChild(XRButton.createButton(renderer, sessionInit));
-
-            // --- TRANSFORM CONTROLS (solo desktop) ---
-            try {
-                transformControls = new TransformControls(camera, renderer.domElement);
-                transformControls.attach(trophyContainer);
-                transformControls.setSize(0.75);
-                transformControls.setMode('translate');
-                transformControls.showX = true;
-                transformControls.showY = true;
-                transformControls.showZ = true;
-                scene.add(transformControls);
-                tcActive = true;
-
-                transformControls.addEventListener('dragging-changed', function (event) {
-                    controls.enabled = !event.value;
-                });
-            } catch (e) {
-                console.error('Error al crear TransformControls:', e);
-                tcActive = false;
-            }
+            const xrButton = XRButton.createButton(renderer, sessionInit);
+            document.body.appendChild(xrButton);
+            console.log('XRButton creado:', xrButton);
 
             // --- CONTROLADOR VR (Lab12 original) ---
             controller1 = renderer.xr.getController(0);
@@ -208,29 +189,61 @@
             raycaster = new THREE.Raycaster();
             window.addEventListener('resize', onWindowResize);
 
+            // --- CARGAR TRANSFORM CONTROLS DINAMICAMENTE (solo desktop) ---
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            if (!isMobile) {
+                import('three/addons/controls/TransformControls.js')
+                    .then(module => {
+                        const TransformControls = module.TransformControls;
+                        transformControls = new TransformControls(camera, renderer.domElement);
+                        transformControls.attach(trophyContainer);
+                        transformControls.setSize(0.75);
+                        transformControls.setMode('translate');
+                        transformControls.showX = true;
+                        transformControls.showY = true;
+                        transformControls.showZ = true;
+                        scene.add(transformControls);
+                        tcReady = true;
+
+                        transformControls.addEventListener('dragging-changed', function (event) {
+                            controls.enabled = !event.value;
+                        });
+
+                        console.log('TransformControls cargado correctamente');
+                        updateStatus();
+                    })
+                    .catch(err => {
+                        console.warn('TransformControls no pudo cargarse:', err);
+                        tcReady = false;
+                        updateStatus();
+                    });
+            } else {
+                console.log('Dispositivo movil detectado: TransformControls omitido');
+                updateStatus();
+            }
+
             // --- MANEJO DE SESION XR ---
-            renderer.xr.addEventListener('sessionstart', onSessionStart);
-            renderer.xr.addEventListener('sessionend', onSessionEnd);
-        }
+            renderer.xr.addEventListener('sessionstart', function () {
+                console.log('XR session iniciada');
+                if (tcReady && transformControls) {
+                    transformControls.detach();
+                    transformControls.visible = false;
+                }
+                controls.enabled = false;
+                updateStatus();
+            });
 
-        function onSessionStart() {
-            console.log('XR session started');
-            if (transformControls && tcActive) {
-                transformControls.detach();
-                transformControls.visible = false;
-            }
-            controls.enabled = false;
-            updateStatus();
-        }
+            renderer.xr.addEventListener('sessionend', function () {
+                console.log('XR session terminada');
+                if (tcReady && transformControls) {
+                    transformControls.attach(trophyContainer);
+                    transformControls.visible = true;
+                }
+                controls.enabled = true;
+                controls.update();
+                updateStatus();
+            });
 
-        function onSessionEnd() {
-            console.log('XR session ended');
-            if (transformControls && tcActive) {
-                transformControls.attach(trophyContainer);
-                transformControls.visible = true;
-            }
-            controls.enabled = true;
-            controls.update();
             updateStatus();
         }
 
@@ -307,9 +320,10 @@
         function updateStatus() {
             const statusEl = document.getElementById('status');
             if (!statusEl) return;
-            const mode = renderer.xr.isPresenting ? 'XR' : 'DESKTOP';
-            const tc = (tcActive && transformControls && transformControls.visible) ? 'ON' : 'OFF';
-            statusEl.innerHTML = 'Modo: ' + mode + ' | TC: ' + tc + ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
+            const mode = renderer && renderer.xr.isPresenting ? 'XR' : 'DESKTOP';
+            const tc = tcReady ? 'ON' : 'OFF';
+            const depth = isDepthSupplied ? 'ON' : 'OFF';
+            statusEl.innerHTML = 'Modo: ' + mode + ' | TC: ' + tc + ' | Depth: ' + depth;
         }
 
         function animate() {
@@ -330,17 +344,21 @@
                 }
             });
 
-            // Forzar orientacion: cara de abajo al piso (ambos modos)
+            // Forzar orientacion: cara de abajo al piso
             if (trophyContainer) {
                 trophyContainer.rotation.set(0, 0, 0);
             }
 
-            // Depth sensing
-            if (renderer.xr.hasDepthSensing && renderer.xr.hasDepthSensing() && !isDepthSupplied) {
-                isDepthSupplied = true;
-                console.log('Depth sensing disponible');
-            } else if (renderer.xr.hasDepthSensing && !renderer.xr.hasDepthSensing() && isDepthSupplied) {
-                isDepthSupplied = false;
+            // Depth sensing (defensivo)
+            try {
+                if (renderer.xr.hasDepthSensing && renderer.xr.hasDepthSensing() && !isDepthSupplied) {
+                    isDepthSupplied = true;
+                    console.log('Depth sensing disponible');
+                } else if (renderer.xr.hasDepthSensing && !renderer.xr.hasDepthSensing() && isDepthSupplied) {
+                    isDepthSupplied = false;
+                }
+            } catch (e) {
+                // ignorar si no existe la funcion
             }
 
             cleanIntersected();
