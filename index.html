@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>three.js xr - dragging trophy (Lab15)</title>
+    <title>three.js xr - dragging trophy with custom depth shader</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
@@ -40,9 +40,9 @@
 <body>
 
     <div id="info">
-        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - dragging trophy (Lab15)
+        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - dragging trophy
     </div>
-    <div id="status">Cargando...</div>
+    <div id="status">Iniciando...</div>
 
     <script type="importmap">
         {
@@ -57,13 +57,12 @@
 
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { TransformControls } from 'three/addons/controls/TransformControls.js';
         import { XRButton } from 'three/addons/webxr/XRButton.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-        let camera, scene, renderer, control;
+        let container;
+        let camera, scene, renderer;
         let controller1;
-        let trophyContainer;
         let isDepthSupplied = false;
         let raycaster;
 
@@ -71,26 +70,25 @@
         const tempMatrix = new THREE.Matrix4();
         const clock = new THREE.Clock();
 
+        let controls, group;
+
         init();
         animate();
 
         function init() {
 
-            // --- RENDERER ---
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-            renderer.xr.enabled = true;
-            document.body.appendChild(renderer.domElement);
+            container = document.createElement('div');
+            document.body.appendChild(container);
 
-            // --- CAMARA ---
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x808080);
+
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10);
             camera.position.set(0, 1.6, 3);
 
-            // --- ESCENA ---
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x808080);
+            controls = new OrbitControls(camera, container);
+            controls.target.set(0, 1.6, 0);
+            controls.update();
 
             const floorGeometry = new THREE.PlaneGeometry(6, 6);
             const floorMaterial = new THREE.ShadowMaterial({ opacity: 0.25, blending: THREE.CustomBlending, transparent: false });
@@ -111,7 +109,10 @@
             light.shadow.mapSize.set(4096, 4096);
             scene.add(light);
 
-            // --- CUBO PADRE: invisible ---
+            group = new THREE.Group();
+            scene.add(group);
+
+            // --- CUBO PADRE: invisible, para raycasting y drag ---
             const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
             const hitMaterial = new THREE.MeshBasicMaterial({
                 transparent: true,
@@ -119,58 +120,47 @@
                 depthWrite: false,
                 depthTest: false
             });
-            trophyContainer = new THREE.Mesh(geometry, hitMaterial);
-            trophyContainer.position.set(0, 1.0, -1.5);
-            trophyContainer.name = "trophyContainer";
-            trophyContainer.renderOrder = -1;
-            scene.add(trophyContainer);
+            const object = new THREE.Mesh(geometry, hitMaterial);
+            object.position.set(0, 1.0, -1.5);
+            object.name = "trophyContainer";
+            object.renderOrder = -1;
+            group.add(object);
 
-            // --- CARGAR TROFEO GLB ---
+            // --- CARGAR TROFEO GLB: mantiene su material original ---
             const loader = new GLTFLoader();
             loader.load('./models/gltf/Trophy.glb', function (gltf) {
+
                 const trophyModel = gltf.scene;
+
                 trophyModel.traverse(function (child) {
                     if (child.isMesh) {
                         child.castShadow = true;
                         child.receiveShadow = true;
                     }
                 });
+
                 trophyModel.scale.set(1.8, 1.8, 1.8);
                 trophyModel.position.set(0, 0, 0);
                 trophyModel.name = "animatedItem";
-                trophyContainer.add(trophyModel);
+
+                object.add(trophyModel);
+
             }, undefined, function (error) {
                 console.error('Error al cargar el trofeo:', error);
             });
 
-            // --- ORBIT CONTROLS (desktop) ---
-            const orbit = new OrbitControls(camera, renderer.domElement);
-            orbit.target.set(0, 1.6, 0);
-            orbit.update();
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.xr.enabled = true;
+            container.appendChild(renderer.domElement);
 
-            // --- TRANSFORM CONTROLS (ejemplo original) ---
-            control = new TransformControls(camera, renderer.domElement);
-            control.addEventListener('change', function () {
-                renderer.render(scene, camera);
-            });
-            control.addEventListener('dragging-changed', function (event) {
-                orbit.enabled = !event.value;
-            });
-            control.attach(trophyContainer);
-            control.setSize(0.75);
-            control.setMode('translate');
-            control.showX = true;
-            control.showY = true;
-            control.showZ = true;
-            scene.add(control);
-
-            // --- BOTON XR ---
             document.body.appendChild(XRButton.createButton(renderer, {
                 'optionalFeatures': ['depth-sensing'],
                 'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
             }));
 
-            // --- CONTROLADOR VR (Lab12) ---
             controller1 = renderer.xr.getController(0);
             controller1.addEventListener('selectstart', onSelectStart);
             controller1.addEventListener('selectend', onSelectEnd);
@@ -186,22 +176,16 @@
             controller1.add(line);
 
             raycaster = new THREE.Raycaster();
-
             window.addEventListener('resize', onWindowResize);
 
-            // --- ALTERNAR ENTRE MODO DESKTOP Y XR ---
-            renderer.xr.addEventListener('sessionstart', function () {
-                control.detach();
-                control.visible = false;
-                orbit.enabled = false;
-            });
-
-            renderer.xr.addEventListener('sessionend', function () {
-                control.attach(trophyContainer);
-                control.visible = true;
-                orbit.enabled = true;
-                orbit.update();
-            });
+            // --- EXPONER REFERENCIAS PARA TRANSFORM CONTROLS ---
+            window._lab15 = {
+                camera: camera,
+                renderer: renderer,
+                scene: scene,
+                trophyContainer: object,
+                controls: controls
+            };
         }
 
         function onWindowResize() {
@@ -210,36 +194,69 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // --- CONTROLADOR VR (Lab12) ---
         function onSelectStart(event) {
             const controller = event.target;
-            controller.updateMatrixWorld();
-            tempMatrix.identity().extractRotation(controller.matrixWorld);
-            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-            const intersections = raycaster.intersectObjects(scene.children, false);
+            const intersections = getIntersections(controller);
 
-            const hit = intersections.find(i => i.object === trophyContainer);
-            if (hit) {
-                trophyContainer.material.opacity = 0.3;
-                trophyContainer.material.color = new THREE.Color(0xffaa00);
-                controller.attach(trophyContainer);
-                controller.userData.selected = trophyContainer;
+            if (intersections.length > 0) {
+                const intersection = intersections[0];
+                const object = intersection.object;
+                object.material.opacity = 0.3;
+                object.material.color = new THREE.Color(0xffaa00);
+                controller.attach(object);
+                controller.userData.selected = object;
             }
             controller.userData.targetRayMode = event.data.targetRayMode;
         }
 
         function onSelectEnd(event) {
             const controller = event.target;
+
             if (controller.userData.selected !== undefined) {
-                trophyContainer.material.opacity = 0.0;
-                scene.attach(trophyContainer);
-                trophyContainer.rotation.set(0, 0, 0);
+                const object = controller.userData.selected;
+                object.material.opacity = 0.0;
+                group.attach(object);
+                object.rotation.set(0, 0, 0);
                 controller.userData.selected = undefined;
             }
         }
 
-        // --- LOOP DE ANIMACION (Lab12) ---
+        function getIntersections(controller) {
+            controller.updateMatrixWorld();
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+            return raycaster.intersectObjects(group.children, false);
+        }
+
+        function intersectObjects(controller) {
+            if (controller.userData.targetRayMode === 'screen') return;
+            if (controller.userData.selected !== undefined) return;
+
+            const line = controller.getObjectByName('line');
+            const intersections = getIntersections(controller);
+
+            if (intersections.length > 0) {
+                const intersection = intersections[0];
+                const object = intersection.object;
+                object.material.opacity = 0.15;
+                object.material.color = new THREE.Color(0xffff00);
+                intersected.push(object);
+                if (line) line.scale.z = intersection.distance;
+            } else {
+                if (line) line.scale.z = 5;
+            }
+        }
+
+        function cleanIntersected() {
+            while (intersected.length) {
+                const object = intersected.pop();
+                if (controller1.userData.selected !== object) {
+                    object.material.opacity = 0.0;
+                }
+            }
+        }
+
         function animate() {
             renderer.setAnimationLoop(render);
         }
@@ -247,17 +264,16 @@
         function render() {
             const elapsedTime = clock.getElapsedTime();
 
-            // Animacion del trofeo
-            const model = trophyContainer.getObjectByName("animatedItem");
-            if (model) {
-                model.rotation.y = elapsedTime * 1.5;
-                model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
-            }
+            group.rotation.set(0, 0, 0);
 
-            // Forzar orientacion: cara de abajo al piso
-            trophyContainer.rotation.set(0, 0, 0);
+            group.children.forEach(cubeContainer => {
+                const model = cubeContainer.getObjectByName("animatedItem");
+                if (model) {
+                    model.rotation.y = elapsedTime * 1.5;
+                    model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
+                }
+            });
 
-            // Depth sensing
             if (renderer.xr.hasDepthSensing && renderer.xr.hasDepthSensing() && !isDepthSupplied) {
                 isDepthSupplied = true;
                 console.log('Depth sensing disponible');
@@ -265,22 +281,68 @@
                 isDepthSupplied = false;
             }
 
-            // Status
+            cleanIntersected();
+            intersectObjects(controller1);
+
             const statusEl = document.getElementById('status');
             if (statusEl) {
-                statusEl.innerHTML = 'Modo: ' + (renderer.xr.isPresenting ? 'XR' : 'DESKTOP') +
-                    ' | TC: ' + (control && control.visible ? 'ON' : 'OFF') +
-                    ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
+                const hasTC = window._lab15 && window._lab15.transformControls ? 'ON' : 'OFF';
+                statusEl.innerHTML = 'Modo: ' + (renderer.xr.isPresenting ? 'XR' : 'DESKTOP') + ' | TC: ' + hasTC + ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
             }
 
-            // Update TransformControls (del ejemplo original)
-            if (control && control.visible) {
-                control.update();
-            }
-
+            controls.update();
             renderer.render(scene, camera);
         }
 
+    </script>
+
+    <!-- TransformControls: modulo COMPLETAMENTE AISLADO -->
+    <script type="module">
+        try {
+            const L = window._lab15;
+            if (!L) {
+                console.warn('Lab15 principal no listo');
+                return;
+            }
+
+            const { TransformControls } = await import('three/addons/controls/TransformControls.js');
+            if (!TransformControls) {
+                console.warn('TransformControls no exportado');
+                return;
+            }
+
+            const tc = new TransformControls(L.camera, L.renderer.domElement);
+            tc.attach(L.trophyContainer);
+            tc.setSize(0.75);
+            tc.setMode('translate');
+            tc.showX = true;
+            tc.showY = true;
+            tc.showZ = true;
+            L.scene.add(tc);
+
+            tc.addEventListener('dragging-changed', function (event) {
+                L.controls.enabled = !event.value;
+            });
+
+            L.renderer.xr.addEventListener('sessionstart', function () {
+                tc.detach();
+                tc.visible = false;
+                L.controls.enabled = false;
+            });
+
+            L.renderer.xr.addEventListener('sessionend', function () {
+                tc.attach(L.trophyContainer);
+                tc.visible = true;
+                L.controls.enabled = true;
+                L.controls.update();
+            });
+
+            L.transformControls = tc;
+            console.log('TransformControls activo');
+
+        } catch (err) {
+            console.error('TransformControls fallo:', err);
+        }
     </script>
 
 </body>
