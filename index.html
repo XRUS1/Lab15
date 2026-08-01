@@ -159,15 +159,14 @@
             // ================================================================
             // BOTON XR: MODO AR (immersive-ar) PARA VER LA SALA REAL EN MOVIL
             // ================================================================
-            const xrButton = XRButton.createButton(renderer, {
-                mode: 'immersive-ar',  // <-- ESTO ES LO QUE FALTABA
+            document.body.appendChild(XRButton.createButton(renderer, {
+                mode: 'immersive-ar',
                 optionalFeatures: ['depth-sensing'],
                 depthSensing: {
                     usagePreference: ['gpu-optimized'],
                     dataFormatPreference: ['luminance-alpha']
                 }
-            });
-            document.body.appendChild(xrButton);
+            }));
 
             controller1 = renderer.xr.getController(0);
             controller1.addEventListener('selectstart', onSelectStart);
