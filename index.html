@@ -58,9 +58,8 @@
 
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { XRButton } from 'three/addons/webxr/XRButton.js';
-        import { ARButton } from 'three/addons/webxr/ARButton.js';
         import { TransformControls } from 'three/addons/controls/TransformControls.js';
+        import { XRButton } from 'three/addons/webxr/XRButton.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
         let camera, scene, renderer, control, orbit;
@@ -72,9 +71,6 @@
         const intersected = [];
         const tempMatrix = new THREE.Matrix4();
         const clock = new THREE.Clock();
-
-        // Detectar si es movil
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
         init();
         animate();
@@ -147,8 +143,11 @@
                 console.error('Error al cargar el trofeo:', error);
             });
 
-            // --- TRANSFORM CONTROLS (desktop) ---
-            control = new TransformControls(camera, renderer.domElement);
+            // ================================================================
+            // TRANSFORM CONTROLS CON RENDERER COMO TERCER PARAMETRO
+            // Esto es lo que faltaba segun el foro de Three.js
+            // ================================================================
+            control = new TransformControls(camera, renderer.domElement, renderer);
             control.addEventListener('dragging-changed', function (event) {
                 orbit.enabled = !event.value;
             });
@@ -162,23 +161,11 @@
             const gizmo = control.getHelper();
             scene.add(gizmo);
 
-            // --- BOTON XR/AR ---
-            if (isMobile) {
- 
-                // En movil: ARButton para ver la sala real
-                document.body.appendChild(ARButton.createButton(renderer, {
-                    requiredFeatures: ['hit-test'],
-                    optionalFeatures: ['dom-overlay'],
-                    domOverlay: { root: document.body }
-                }));                
-          
-            } else {
-                // En desktop: XRButton para VR
-                document.body.appendChild(XRButton.createButton(renderer, {
-                    'optionalFeatures': ['depth-sensing'],
-                    'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
-                }));
-            }
+            // --- BOTON XR ---
+            document.body.appendChild(XRButton.createButton(renderer, {
+                'optionalFeatures': ['depth-sensing'],
+                'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
+            }));
 
             // --- CONTROLADOR VR (Lab12) ---
             controller1 = renderer.xr.getController(0);
@@ -204,8 +191,6 @@
                 control.detach();
                 gizmo.visible = false;
                 orbit.enabled = false;
-                // ESTO ES NUEVO: Hace transparente el fondo para ver tu sala
-                scene.background = null; 
             });
 
             renderer.xr.addEventListener('sessionend', function () {
@@ -213,8 +198,6 @@
                 gizmo.visible = true;
                 orbit.enabled = true;
                 orbit.update();
-                // ESTO ES NUEVO: Devuelve el fondo gris en la computadora
-                scene.background = new THREE.Color(0x808080);                
             });
         }
 
@@ -269,6 +252,7 @@
 
             if (renderer.xr.hasDepthSensing && renderer.xr.hasDepthSensing() && !isDepthSupplied) {
                 isDepthSupplied = true;
+                console.log('Depth sensing disponible');
             } else if (renderer.xr.hasDepthSensing && !renderer.xr.hasDepthSensing() && isDepthSupplied) {
                 isDepthSupplied = false;
             }
@@ -278,8 +262,7 @@
                 const tc = control && control.getHelper() && control.getHelper().visible ? 'ON' : 'OFF';
                 statusEl.innerHTML = 'Modo: ' + (renderer.xr.isPresenting ? 'XR' : 'DESKTOP') +
                     ' | TC: ' + tc +
-                    ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF') +
-                    ' | Mobile: ' + (isMobile ? 'SI' : 'NO');
+                    ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
             }
 
             renderer.render(scene, camera);
