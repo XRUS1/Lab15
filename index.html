@@ -54,8 +54,8 @@
     </script>
 
     <!-- ============================================================ -->
-    <!-- SCRIPT PRINCIPAL: LAB12 funcional al 100%. Si falla algo aqui,
-         el problema NO es TransformControls. -->
+    <!-- SCRIPT 1: LAB12 EXACTO. Este script funciona solo. Si falla   -->
+    <!-- algo aqui, el problema NO es TransformControls.               -->
     <!-- ============================================================ -->
     <script type="module">
 
@@ -185,16 +185,22 @@
             raycaster = new THREE.Raycaster();
             window.addEventListener('resize', onWindowResize);
 
-            // --- EXPONER REFERENCIAS AL SEGUNDO SCRIPT ---
-            window.lab15 = {
+            // --- EXPONER AL AMBIENTE GLOBAL PARA SCRIPT 2 ---
+            window._lab15 = {
                 camera: camera,
                 renderer: renderer,
                 scene: scene,
                 trophyContainer: trophyContainer,
-                controls: controls
+                controls: controls,
+                clock: clock,
+                group: group,
+                controller1: controller1,
+                intersected: intersected,
+                tempMatrix: tempMatrix,
+                raycaster: raycaster
             };
 
-            updateStatus('LAB12 listo. Esperando TransformControls...');
+            document.getElementById('status').innerHTML = 'LAB12 listo';
         }
 
         function onWindowResize() {
@@ -266,11 +272,6 @@
             }
         }
 
-        function updateStatus(msg) {
-            const el = document.getElementById('status');
-            if (el) el.innerHTML = msg;
-        }
-
         function animate() {
             renderer.setAnimationLoop(render);
         }
@@ -301,12 +302,16 @@
             cleanIntersected();
             intersectObjects(controller1);
 
-            const tc = window.lab15 && window.lab15.transformControls ? 'ON' : 'OFF';
-            updateStatus(
+            const tc = window._lab15 && window._lab15.transformControls ? 'ON' : 'OFF';
+            document.getElementById('status').innerHTML =
                 'Modo: ' + (renderer.xr.isPresenting ? 'XR' : 'DESKTOP') +
                 ' | TC: ' + tc +
-                ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF')
-            );
+                ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
+
+            // ACTUALIZAR TRANSFORM CONTROLS SI EXISTE (clave del ejemplo original)
+            if (window._lab15 && window._lab15.transformControls) {
+                window._lab15.transformControls.update();
+            }
 
             controls.update();
             renderer.render(scene, camera);
@@ -315,19 +320,32 @@
     </script>
 
     <!-- ============================================================ -->
-    <!-- SCRIPT SECUNDARIO: TransformControls. Si este script falla
-         (error de import, incompatibilidad, etc.), el script principal
-         sigue funcionando perfectamente y el boton START XR sigue activo. -->
+    <!-- SCRIPT 2: TransformControls. COMPLETAMENTE AISLADO.           -->
+    <!-- Si este script falla (import roto, incompatibilidad, etc.),   -->
+    <!-- el Script 1 sigue funcionando al 100% y START XR debe abrir.  -->
     <!-- ============================================================ -->
     <script type="module">
         try {
-            const L = window.lab15;
+            const L = window._lab15;
             if (!L) {
-                console.warn('Lab15 principal no disponible aun');
+                console.warn('Script principal aun no listo');
                 return;
             }
 
-            const { TransformControls } = await import('three/addons/controls/TransformControls.js');
+            // Detectar si estamos en movil: en movil NO cargamos TransformControls
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            if (isMobile) {
+                console.log('Movil detectado: TransformControls omitido');
+                return;
+            }
+
+            const module = await import('three/addons/controls/TransformControls.js');
+            const TransformControls = module.TransformControls;
+
+            if (!TransformControls) {
+                console.warn('TransformControls no exportado correctamente');
+                return;
+            }
 
             const tc = new TransformControls(L.camera, L.renderer.domElement);
             tc.attach(L.trophyContainer);
@@ -356,11 +374,10 @@
             });
 
             L.transformControls = tc;
-            console.log('TransformControls cargado correctamente');
+            console.log('TransformControls activo en desktop');
 
         } catch (err) {
-            console.error('TransformControls fallo:', err);
-            // El script principal sigue funcionando igual.
+            console.error('TransformControls error:', err);
         }
     </script>
 
