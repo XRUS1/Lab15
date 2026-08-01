@@ -206,6 +206,8 @@
                 control.detach();
                 gizmo.visible = false;
                 orbit.enabled = false;
+                // ESTO ES NUEVO: Hace transparente el fondo para ver tu sala
+                scene.background = null; 
             });
 
             renderer.xr.addEventListener('sessionend', function () {
@@ -213,6 +215,8 @@
                 gizmo.visible = true;
                 orbit.enabled = true;
                 orbit.update();
+                // ESTO ES NUEVO: Devuelve el fondo gris en la computadora
+                scene.background = new THREE.Color(0x808080);                
             });
         }
 
