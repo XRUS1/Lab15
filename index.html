@@ -164,16 +164,14 @@
 
             // --- BOTON XR/AR ---
             if (isMobile) {
+                //------------------------
                 // En movil: ARButton para ver la sala real
                 document.body.appendChild(ARButton.createButton(renderer, {
                     requiredFeatures: ['hit-test'],
-                    optionalFeatures: ['dom-overlay', 'depth-sensing'],
-                    domOverlay: { root: document.body },
-                    depthSensing: {
-                        usagePreference: ['gpu-optimized'],
-                        dataFormatPreference: ['luminance-alpha']
-                    }
-                }));
+                    optionalFeatures: ['dom-overlay'],
+                    domOverlay: { root: document.body }
+                }));                
+                //---------------------
             } else {
                 // En desktop: XRButton para VR
                 document.body.appendChild(XRButton.createButton(renderer, {
