@@ -39,17 +39,18 @@
             position: absolute;
             top: 60px;
             right: 10px;
-            width: 280px;
-            max-height: 200px;
+            width: 300px;
+            max-height: 250px;
             overflow-y: auto;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0,0,0,0.85);
             color: #ff5555;
             font-family: monospace;
             font-size: 11px;
-            padding: 8px;
-            border: 1px solid #444;
+            padding: 10px;
+            border: 1px solid #555;
             z-index: 200;
             pointer-events: none;
+            line-height: 1.5;
         }
     </style>
 </head>
@@ -80,226 +81,232 @@
 
         function log(msg) {
             const el = document.getElementById('log');
-            if (el) el.innerHTML += msg + '<br>';
+            if (el) el.innerHTML += '> ' + msg + '<br>';
             console.log(msg);
         }
 
-        try {
+        let camera, scene, renderer, control, orbit;
+        let controller1;
+        let trophyContainer;
+        let isDepthSupplied = false;
+        let raycaster;
+        const clock = new THREE.Clock();
 
-            let camera, scene, renderer, control, orbit;
-            let controller1;
-            let trophyContainer;
-            let isDepthSupplied = false;
-            let raycaster;
+        init();
+        animate();
 
-            const intersected = [];
-            const tempMatrix = new THREE.Matrix4();
-            const clock = new THREE.Clock();
+        function init() {
+            log('INIT');
 
-            init();
-            animate();
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+            log('Renderer OK');
 
-            function init() {
-                log('INIT start');
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10);
+            camera.position.set(0, 1.6, 3);
 
-                renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-                renderer.setPixelRatio(window.devicePixelRatio);
-                renderer.setSize(window.innerWidth, window.innerHeight);
-                renderer.shadowMap.enabled = true;
-                renderer.xr.enabled = true;
-                document.body.appendChild(renderer.domElement);
-                log('Renderer creado');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x808080);
 
-                camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10);
-                camera.position.set(0, 1.6, 3);
+            const floorGeometry = new THREE.PlaneGeometry(6, 6);
+            const floorMaterial = new THREE.ShadowMaterial({ opacity: 0.25, blending: THREE.CustomBlending, transparent: false });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
 
-                scene = new THREE.Scene();
-                scene.background = new THREE.Color(0x808080);
+            scene.add(new THREE.HemisphereLight(0xbcbcbc, 0xa5a5a5, 3));
 
-                const floorGeometry = new THREE.PlaneGeometry(6, 6);
-                const floorMaterial = new THREE.ShadowMaterial({ opacity: 0.25, blending: THREE.CustomBlending, transparent: false });
-                const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-                floor.rotation.x = -Math.PI / 2;
-                floor.receiveShadow = true;
-                scene.add(floor);
+            const light = new THREE.DirectionalLight(0xffffff, 3);
+            light.position.set(0, 6, 0);
+            light.castShadow = true;
+            light.shadow.camera.top = 3;
+            light.shadow.camera.bottom = -3;
+            light.shadow.camera.right = 3;
+            light.shadow.camera.left = -3;
+            light.shadow.mapSize.set(4096, 4096);
+            scene.add(light);
 
-                scene.add(new THREE.HemisphereLight(0xbcbcbc, 0xa5a5a5, 3));
+            orbit = new OrbitControls(camera, renderer.domElement);
+            orbit.target.set(0, 1.0, -1.5);
+            orbit.update();
 
-                const light = new THREE.DirectionalLight(0xffffff, 3);
-                light.position.set(0, 6, 0);
-                light.castShadow = true;
-                light.shadow.camera.top = 3;
-                light.shadow.camera.bottom = -3;
-                light.shadow.camera.right = 3;
-                light.shadow.camera.left = -3;
-                light.shadow.mapSize.set(4096, 4096);
-                scene.add(light);
+            const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+            const hitMaterial = new THREE.MeshBasicMaterial({
+                transparent: true,
+                opacity: 0.0,
+                depthWrite: false,
+                depthTest: false
+            });
+            trophyContainer = new THREE.Mesh(geometry, hitMaterial);
+            trophyContainer.position.set(0, 1.0, -1.5);
+            trophyContainer.name = "trophyContainer";
+            trophyContainer.renderOrder = -1;
+            scene.add(trophyContainer);
 
-                orbit = new OrbitControls(camera, renderer.domElement);
-                orbit.target.set(0, 1.0, -1.5);
-                orbit.update();
-
-                const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-                const hitMaterial = new THREE.MeshBasicMaterial({
-                    transparent: true,
-                    opacity: 0.0,
-                    depthWrite: false,
-                    depthTest: false
+            const loader = new GLTFLoader();
+            loader.load('./models/gltf/Trophy.glb', function (gltf) {
+                const trophyModel = gltf.scene;
+                trophyModel.traverse(function (child) {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
                 });
-                trophyContainer = new THREE.Mesh(geometry, hitMaterial);
-                trophyContainer.position.set(0, 1.0, -1.5);
-                trophyContainer.name = "trophyContainer";
-                trophyContainer.renderOrder = -1;
-                scene.add(trophyContainer);
+                trophyModel.scale.set(1.8, 1.8, 1.8);
+                trophyModel.position.set(0, 0, 0);
+                trophyModel.name = "animatedItem";
+                trophyContainer.add(trophyModel);
+            }, undefined, function (error) {
+                log('GLTF ERROR: ' + error.message);
+            });
 
-                const loader = new GLTFLoader();
-                loader.load('./models/gltf/Trophy.glb', function (gltf) {
-                    const trophyModel = gltf.scene;
-                    trophyModel.traverse(function (child) {
-                        if (child.isMesh) {
-                            child.castShadow = true;
-                            child.receiveShadow = true;
-                        }
-                    });
-                    trophyModel.scale.set(1.8, 1.8, 1.8);
-                    trophyModel.position.set(0, 0, 0);
-                    trophyModel.name = "animatedItem";
-                    trophyContainer.add(trophyModel);
-                }, undefined, function (error) {
-                    log('ERROR GLTF: ' + error.message);
-                });
+            control = new TransformControls(camera, renderer.domElement);
+            control.addEventListener('dragging-changed', function (event) {
+                orbit.enabled = !event.value;
+            });
+            control.attach(trophyContainer);
+            control.setSize(0.75);
+            control.setMode('translate');
+            control.showX = true;
+            control.showY = true;
+            control.showZ = true;
 
-                control = new TransformControls(camera, renderer.domElement);
-                control.addEventListener('dragging-changed', function (event) {
-                    orbit.enabled = !event.value;
+            const gizmo = control.getHelper();
+            scene.add(gizmo);
+            log('TransformControls OK');
+
+            // ================================================================
+            // BOTON XR: MODO AR (para ver la sala real en movil)
+            // ================================================================
+            const sessionInit = {
+                mode: 'immersive-ar',
+                optionalFeatures: ['depth-sensing'],
+                depthSensing: {
+                    usagePreference: ['gpu-optimized'],
+                    dataFormatPreference: ['luminance-alpha']
+                }
+            };
+            log('XR mode: ' + sessionInit.mode);
+
+            const btn = XRButton.createButton(renderer, sessionInit);
+            document.body.appendChild(btn);
+            log('XRButton creado');
+
+            // Verificar soporte WebXR
+            if (navigator.xr) {
+                log('navigator.xr existe');
+                navigator.xr.isSessionSupported('immersive-ar').then(function (supported) {
+                    log('AR soportado: ' + supported);
+                }).catch(function (err) {
+                    log('AR error: ' + err.message);
                 });
+            } else {
+                log('navigator.xr NO EXISTE');
+            }
+
+            controller1 = renderer.xr.getController(0);
+            controller1.addEventListener('selectstart', onSelectStart);
+            controller1.addEventListener('selectend', onSelectEnd);
+            scene.add(controller1);
+
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(0, 0, -1)
+            ]);
+            const line = new THREE.Line(lineGeometry);
+            line.name = 'line';
+            line.scale.z = 5;
+            controller1.add(line);
+
+            raycaster = new THREE.Raycaster();
+
+            window.addEventListener('resize', onWindowResize);
+
+            renderer.xr.addEventListener('sessionstart', function () {
+                log('XR SESSION START');
+                control.detach();
+                gizmo.visible = false;
+                orbit.enabled = false;
+            });
+
+            renderer.xr.addEventListener('sessionend', function () {
+                log('XR SESSION END');
                 control.attach(trophyContainer);
-                control.setSize(0.75);
-                control.setMode('translate');
-                control.showX = true;
-                control.showY = true;
-                control.showZ = true;
+                gizmo.visible = true;
+                orbit.enabled = true;
+                orbit.update();
+            });
+        }
 
-                const gizmo = control.getHelper();
-                scene.add(gizmo);
-                log('TransformControls OK');
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
 
-                // BOTON XR - exactamente como Lab12 (sin mode explicito)
-                try {
-                    const btn = XRButton.createButton(renderer, {
-                        'optionalFeatures': ['depth-sensing'],
-                        'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
-                    });
-                    document.body.appendChild(btn);
-                    log('XRButton creado');
-                } catch (e) {
-                    log('ERROR XRButton: ' + e.message);
-                }
+        function onSelectStart(event) {
+            const controller = event.target;
+            controller.updateMatrixWorld();
+            const tempMatrix = new THREE.Matrix4();
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+            const intersections = raycaster.intersectObjects(scene.children, false);
 
-                controller1 = renderer.xr.getController(0);
-                controller1.addEventListener('selectstart', onSelectStart);
-                controller1.addEventListener('selectend', onSelectEnd);
-                scene.add(controller1);
-
-                const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-                    new THREE.Vector3(0, 0, 0),
-                    new THREE.Vector3(0, 0, -1)
-                ]);
-                const line = new THREE.Line(lineGeometry);
-                line.name = 'line';
-                line.scale.z = 5;
-                controller1.add(line);
-
-                raycaster = new THREE.Raycaster();
-
-                window.addEventListener('resize', onWindowResize);
-
-                renderer.xr.addEventListener('sessionstart', function () {
-                    log('XR SESSION START');
-                    control.detach();
-                    gizmo.visible = false;
-                    orbit.enabled = false;
-                });
-
-                renderer.xr.addEventListener('sessionend', function () {
-                    log('XR SESSION END');
-                    control.attach(trophyContainer);
-                    gizmo.visible = true;
-                    orbit.enabled = true;
-                    orbit.update();
-                });
-
-                log('INIT completo');
+            const hit = intersections.find(i => i.object === trophyContainer);
+            if (hit) {
+                trophyContainer.material.opacity = 0.3;
+                trophyContainer.material.color = new THREE.Color(0xffaa00);
+                controller.attach(trophyContainer);
+                controller.userData.selected = trophyContainer;
             }
+            controller.userData.targetRayMode = event.data.targetRayMode;
+        }
 
-            function onWindowResize() {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            }
-
-            function onSelectStart(event) {
-                const controller = event.target;
-                controller.updateMatrixWorld();
-                tempMatrix.identity().extractRotation(controller.matrixWorld);
-                raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-                raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-                const intersections = raycaster.intersectObjects(scene.children, false);
-
-                const hit = intersections.find(i => i.object === trophyContainer);
-                if (hit) {
-                    trophyContainer.material.opacity = 0.3;
-                    trophyContainer.material.color = new THREE.Color(0xffaa00);
-                    controller.attach(trophyContainer);
-                    controller.userData.selected = trophyContainer;
-                }
-                controller.userData.targetRayMode = event.data.targetRayMode;
-            }
-
-            function onSelectEnd(event) {
-                const controller = event.target;
-                if (controller.userData.selected !== undefined) {
-                    trophyContainer.material.opacity = 0.0;
-                    scene.attach(trophyContainer);
-                    trophyContainer.rotation.set(0, 0, 0);
-                    controller.userData.selected = undefined;
-                }
-            }
-
-            function animate() {
-                renderer.setAnimationLoop(render);
-            }
-
-            function render() {
-                const elapsedTime = clock.getElapsedTime();
-
-                const model = trophyContainer.getObjectByName("animatedItem");
-                if (model) {
-                    model.rotation.y = elapsedTime * 1.5;
-                    model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
-                }
-
+        function onSelectEnd(event) {
+            const controller = event.target;
+            if (controller.userData.selected !== undefined) {
+                trophyContainer.material.opacity = 0.0;
+                scene.attach(trophyContainer);
                 trophyContainer.rotation.set(0, 0, 0);
+                controller.userData.selected = undefined;
+            }
+        }
 
-                if (renderer.xr.hasDepthSensing && renderer.xr.hasDepthSensing() && !isDepthSupplied) {
-                    isDepthSupplied = true;
-                    log('Depth sensing ON');
-                }
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
 
-                const statusEl = document.getElementById('status');
-                if (statusEl) {
-                    const tc = control && control.getHelper() && control.getHelper().visible ? 'ON' : 'OFF';
-                    statusEl.innerHTML = 'Modo: ' + (renderer.xr.isPresenting ? 'XR' : 'DESKTOP') +
-                        ' | TC: ' + tc +
-                        ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
-                }
+        function render() {
+            const elapsedTime = clock.getElapsedTime();
 
-                renderer.render(scene, camera);
+            const model = trophyContainer.getObjectByName("animatedItem");
+            if (model) {
+                model.rotation.y = elapsedTime * 1.5;
+                model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
             }
 
-        } catch (err) {
-            log('FATAL ERROR: ' + err.message);
-            console.error(err);
+            trophyContainer.rotation.set(0, 0, 0);
+
+            if (renderer.xr.hasDepthSensing && renderer.xr.hasDepthSensing() && !isDepthSupplied) {
+                isDepthSupplied = true;
+                log('Depth ON');
+            }
+
+            const statusEl = document.getElementById('status');
+            if (statusEl) {
+                const tc = control && control.getHelper() && control.getHelper().visible ? 'ON' : 'OFF';
+                statusEl.innerHTML = 'Modo: ' + (renderer.xr.isPresenting ? 'XR' : 'DESKTOP') +
+                    ' | TC: ' + tc +
+                    ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
+            }
+
+            renderer.render(scene, camera);
         }
 
     </script>
