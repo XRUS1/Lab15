@@ -76,7 +76,6 @@
 
         function init() {
 
-            // --- RENDERER (con XR habilitado) ---
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -84,11 +83,9 @@
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            // --- CAMARA ---
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10);
             camera.position.set(0, 1.6, 3);
 
-            // --- ESCENA ---
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x808080);
 
@@ -111,12 +108,10 @@
             light.shadow.mapSize.set(4096, 4096);
             scene.add(light);
 
-            // --- ORBIT CONTROLS (desktop) ---
             orbit = new OrbitControls(camera, renderer.domElement);
             orbit.target.set(0, 1.0, -1.5);
             orbit.update();
 
-            // --- CUBO PADRE: invisible ---
             const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
             const hitMaterial = new THREE.MeshBasicMaterial({
                 transparent: true,
@@ -130,7 +125,6 @@
             trophyContainer.renderOrder = -1;
             scene.add(trophyContainer);
 
-            // --- CARGAR TROFEO GLB ---
             const loader = new GLTFLoader();
             loader.load('./models/gltf/Trophy.glb', function (gltf) {
                 const trophyModel = gltf.scene;
@@ -148,7 +142,6 @@
                 console.error('Error al cargar el trofeo:', error);
             });
 
-            // --- TRANSFORM CONTROLS (API moderna: getHelper()) ---
             control = new TransformControls(camera, renderer.domElement);
             control.addEventListener('dragging-changed', function (event) {
                 orbit.enabled = !event.value;
@@ -163,13 +156,19 @@
             const gizmo = control.getHelper();
             scene.add(gizmo);
 
-            // --- BOTON XR ---
-            document.body.appendChild(XRButton.createButton(renderer, {
-                'optionalFeatures': ['depth-sensing'],
-                'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
-            }));
+            // ================================================================
+            // BOTON XR: MODO AR (immersive-ar) PARA VER LA SALA REAL EN MOVIL
+            // ================================================================
+            const xrButton = XRButton.createButton(renderer, {
+                mode: 'immersive-ar',  // <-- ESTO ES LO QUE FALTABA
+                optionalFeatures: ['depth-sensing'],
+                depthSensing: {
+                    usagePreference: ['gpu-optimized'],
+                    dataFormatPreference: ['luminance-alpha']
+                }
+            });
+            document.body.appendChild(xrButton);
 
-            // --- CONTROLADOR VR (Lab12) ---
             controller1 = renderer.xr.getController(0);
             controller1.addEventListener('selectstart', onSelectStart);
             controller1.addEventListener('selectend', onSelectEnd);
@@ -188,7 +187,6 @@
 
             window.addEventListener('resize', onWindowResize);
 
-            // --- ALTERNAR ENTRE DESKTOP Y XR ---
             renderer.xr.addEventListener('sessionstart', function () {
                 control.detach();
                 gizmo.visible = false;
@@ -209,7 +207,6 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // --- CONTROLADOR VR (Lab12) ---
         function onSelectStart(event) {
             const controller = event.target;
             controller.updateMatrixWorld();
@@ -238,7 +235,6 @@
             }
         }
 
-        // --- LOOP DE ANIMACION ---
         function animate() {
             renderer.setAnimationLoop(render);
         }
@@ -246,17 +242,14 @@
         function render() {
             const elapsedTime = clock.getElapsedTime();
 
-            // Animacion del trofeo
             const model = trophyContainer.getObjectByName("animatedItem");
             if (model) {
                 model.rotation.y = elapsedTime * 1.5;
                 model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
             }
 
-            // Forzar orientacion: cara de abajo al piso
             trophyContainer.rotation.set(0, 0, 0);
 
-            // Depth sensing
             if (renderer.xr.hasDepthSensing && renderer.xr.hasDepthSensing() && !isDepthSupplied) {
                 isDepthSupplied = true;
                 console.log('Depth sensing disponible');
@@ -264,12 +257,6 @@
                 isDepthSupplied = false;
             }
 
-            // Controller VR hover
-            if (controller1 && !renderer.xr.isPresenting === false) {
-                // Solo en XR
-            }
-
-            // Status
             const statusEl = document.getElementById('status');
             if (statusEl) {
                 const tc = control && control.getHelper() && control.getHelper().visible ? 'ON' : 'OFF';
