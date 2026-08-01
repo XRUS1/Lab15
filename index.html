@@ -1,349 +1,227 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <title>three.js xr - dragging trophy with custom depth shader</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <style>
-        body {
-            margin: 0;
-            background-color: #000;
-            color: #fff;
-            font-family: sans-serif;
-            overflow: hidden;
-        }
-        #info {
-            position: absolute;
-            top: 10px;
-            width: 100%;
-            text-align: center;
-            z-index: 100;
-            pointer-events: none;
-        }
-        a {
-            color: #4af;
-            text-decoration: none;
-        }
-        #status {
-            position: absolute;
-            bottom: 10px;
-            width: 100%;
-            text-align: center;
-            color: #0f0;
-            font-family: monospace;
-            font-size: 13px;
-            pointer-events: none;
-            z-index: 100;
-        }
-    </style>
-</head>
-<body>
+	<head>
+		<title>three.js webgl - transform controls</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<meta property="og:title" content="three.js webgl - transform controls">
+		<meta property="og:type" content="website">
+		<link type="text/css" rel="stylesheet" href="main.css">
+	</head>
+	<body>
 
-    <div id="info">
-        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - dragging trophy
-    </div>
-    <div id="status">Iniciando...</div>
+		<div id="info">
+			"W" translate | "E" rotate | "R" scale | "+/-" adjust size<br />
+			"Q" toggle world/local space |  "Shift" hold to snap to grid<br />
+			"X" toggle X | "Y" toggle Y | "Z" toggle Z | "Spacebar" toggle enabled<br />
+			"Esc" reset current transform<br />
+			"C" toggle camera | "V" random zoom
+		</div>
 
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "./build/three.module.js",
-                "three/addons/": "./jsm/"
-            }
-        }
-    </script>
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "./build/three.module.js",
+					"three/addons/": "./jsm/"
+				}
+			}
+		</script>
 
-    <script type="module">
+		<script type="module">
 
-        import * as THREE from 'three';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { XRButton } from 'three/addons/webxr/XRButton.js';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+			import * as THREE from 'three';
 
-        let container;
-        let camera, scene, renderer;
-        let controller1;
-        let isDepthSupplied = false;
-        let raycaster;
+			import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+			import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
-        const intersected = [];
-        const tempMatrix = new THREE.Matrix4();
-        const clock = new THREE.Clock();
+			let cameraPersp, cameraOrtho, currentCamera;
+			let scene, renderer, control, orbit;
 
-        let controls, group;
+			init();
+			render();
 
-        init();
-        animate();
+			function init() {
 
-        function init() {
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				document.body.appendChild( renderer.domElement );
 
-            container = document.createElement('div');
-            document.body.appendChild(container);
+				const aspect = window.innerWidth / window.innerHeight;
 
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x808080);
+				const frustumSize = 5;
 
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10);
-            camera.position.set(0, 1.6, 3);
+				cameraPersp = new THREE.PerspectiveCamera( 50, aspect, 0.1, 100 );
+				cameraOrtho = new THREE.OrthographicCamera( - frustumSize * aspect, frustumSize * aspect, frustumSize, - frustumSize, 0.1, 100 );
+				currentCamera = cameraPersp;
 
-            controls = new OrbitControls(camera, container);
-            controls.target.set(0, 1.6, 0);
-            controls.update();
+				currentCamera.position.set( 5, 2.5, 5 );
 
-            const floorGeometry = new THREE.PlaneGeometry(6, 6);
-            const floorMaterial = new THREE.ShadowMaterial({ opacity: 0.25, blending: THREE.CustomBlending, transparent: false });
-            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-            floor.rotation.x = -Math.PI / 2;
-            floor.receiveShadow = true;
-            scene.add(floor);
+				scene = new THREE.Scene();
+				scene.add( new THREE.GridHelper( 5, 10, 0x888888, 0x444444 ) );
 
-            scene.add(new THREE.HemisphereLight(0xbcbcbc, 0xa5a5a5, 3));
+				const ambientLight = new THREE.AmbientLight( 0xffffff );
+				scene.add( ambientLight );
 
-            const light = new THREE.DirectionalLight(0xffffff, 3);
-            light.position.set(0, 6, 0);
-            light.castShadow = true;
-            light.shadow.camera.top = 3;
-            light.shadow.camera.bottom = -3;
-            light.shadow.camera.right = 3;
-            light.shadow.camera.left = -3;
-            light.shadow.mapSize.set(4096, 4096);
-            scene.add(light);
+				const light = new THREE.DirectionalLight( 0xffffff, 4 );
+				light.position.set( 1, 1, 1 );
+				scene.add( light );
 
-            group = new THREE.Group();
-            scene.add(group);
+				const texture = new THREE.TextureLoader().load( 'textures/crate.gif', render );
+				texture.colorSpace = THREE.SRGBColorSpace;
+				texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-            // --- CUBO PADRE: invisible, para raycasting y drag ---
-            const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-            const hitMaterial = new THREE.MeshBasicMaterial({
-                transparent: true,
-                opacity: 0.0,
-                depthWrite: false,
-                depthTest: false
-            });
-            const object = new THREE.Mesh(geometry, hitMaterial);
-            object.position.set(0, 1.0, -1.5);
-            object.name = "trophyContainer";
-            object.renderOrder = -1;
-            group.add(object);
+				const geometry = new THREE.BoxGeometry();
+				const material = new THREE.MeshLambertMaterial( { map: texture } );
 
-            // --- CARGAR TROFEO GLB: mantiene su material original ---
-            const loader = new GLTFLoader();
-            loader.load('./models/gltf/Trophy.glb', function (gltf) {
+				orbit = new OrbitControls( currentCamera, renderer.domElement );
+				orbit.update();
+				orbit.addEventListener( 'change', render );
 
-                const trophyModel = gltf.scene;
+				control = new TransformControls( currentCamera, renderer.domElement );
+				control.addEventListener( 'change', render );
+				control.addEventListener( 'dragging-changed', function ( event ) {
 
-                trophyModel.traverse(function (child) {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                        child.receiveShadow = true;
-                    }
-                });
+					orbit.enabled = ! event.value;
 
-                trophyModel.scale.set(1.8, 1.8, 1.8);
-                trophyModel.position.set(0, 0, 0);
-                trophyModel.name = "animatedItem";
+				} );
 
-                object.add(trophyModel);
+				const mesh = new THREE.Mesh( geometry, material );
+				scene.add( mesh );
 
-            }, undefined, function (error) {
-                console.error('Error al cargar el trofeo:', error);
-            });
+				control.attach( mesh );
 
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-            renderer.xr.enabled = true;
-            container.appendChild(renderer.domElement);
+				const gizmo = control.getHelper();
+				scene.add( gizmo );
 
-            document.body.appendChild(XRButton.createButton(renderer, {
-                'optionalFeatures': ['depth-sensing'],
-                'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
-            }));
+				window.addEventListener( 'resize', onWindowResize );
 
-            controller1 = renderer.xr.getController(0);
-            controller1.addEventListener('selectstart', onSelectStart);
-            controller1.addEventListener('selectend', onSelectEnd);
-            scene.add(controller1);
+				window.addEventListener( 'keydown', function ( event ) {
 
-            const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(0, 0, 0),
-                new THREE.Vector3(0, 0, -1)
-            ]);
-            const line = new THREE.Line(lineGeometry);
-            line.name = 'line';
-            line.scale.z = 5;
-            controller1.add(line);
+					switch ( event.key ) {
 
-            raycaster = new THREE.Raycaster();
-            window.addEventListener('resize', onWindowResize);
+						case 'q':
+							control.setSpace( control.space === 'local' ? 'world' : 'local' );
+							break;
 
-            // --- EXPONER REFERENCIAS PARA TRANSFORM CONTROLS ---
-            window._lab15 = {
-                camera: camera,
-                renderer: renderer,
-                scene: scene,
-                trophyContainer: object,
-                controls: controls
-            };
-        }
+						case 'Shift':
+							control.setTranslationSnap( 1 );
+							control.setRotationSnap( THREE.MathUtils.degToRad( 15 ) );
+							control.setScaleSnap( 0.25 );
+							break;
 
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
+						case 'w':
+							control.setMode( 'translate' );
+							break;
 
-        function onSelectStart(event) {
-            const controller = event.target;
-            const intersections = getIntersections(controller);
+						case 'e':
+							control.setMode( 'rotate' );
+							break;
 
-            if (intersections.length > 0) {
-                const intersection = intersections[0];
-                const object = intersection.object;
-                object.material.opacity = 0.3;
-                object.material.color = new THREE.Color(0xffaa00);
-                controller.attach(object);
-                controller.userData.selected = object;
-            }
-            controller.userData.targetRayMode = event.data.targetRayMode;
-        }
+						case 'r':
+							control.setMode( 'scale' );
+							break;
 
-        function onSelectEnd(event) {
-            const controller = event.target;
+						case 'c':
+							const position = currentCamera.position.clone();
 
-            if (controller.userData.selected !== undefined) {
-                const object = controller.userData.selected;
-                object.material.opacity = 0.0;
-                group.attach(object);
-                object.rotation.set(0, 0, 0);
-                controller.userData.selected = undefined;
-            }
-        }
+							currentCamera = currentCamera.isPerspectiveCamera ? cameraOrtho : cameraPersp;
+							currentCamera.position.copy( position );
 
-        function getIntersections(controller) {
-            controller.updateMatrixWorld();
-            tempMatrix.identity().extractRotation(controller.matrixWorld);
-            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-            return raycaster.intersectObjects(group.children, false);
-        }
+							orbit.object = currentCamera;
+							control.camera = currentCamera;
 
-        function intersectObjects(controller) {
-            if (controller.userData.targetRayMode === 'screen') return;
-            if (controller.userData.selected !== undefined) return;
+							currentCamera.lookAt( orbit.target.x, orbit.target.y, orbit.target.z );
+							onWindowResize();
+							break;
 
-            const line = controller.getObjectByName('line');
-            const intersections = getIntersections(controller);
+						case 'v':
+							const randomFoV = Math.random() + 0.1;
+							const randomZoom = Math.random() + 0.1;
 
-            if (intersections.length > 0) {
-                const intersection = intersections[0];
-                const object = intersection.object;
-                object.material.opacity = 0.15;
-                object.material.color = new THREE.Color(0xffff00);
-                intersected.push(object);
-                if (line) line.scale.z = intersection.distance;
-            } else {
-                if (line) line.scale.z = 5;
-            }
-        }
+							cameraPersp.fov = randomFoV * 160;
+							cameraOrtho.bottom = - randomFoV * 500;
+							cameraOrtho.top = randomFoV * 500;
 
-        function cleanIntersected() {
-            while (intersected.length) {
-                const object = intersected.pop();
-                if (controller1.userData.selected !== object) {
-                    object.material.opacity = 0.0;
-                }
-            }
-        }
+							cameraPersp.zoom = randomZoom * 5;
+							cameraOrtho.zoom = randomZoom * 5;
+							onWindowResize();
+							break;
 
-        function animate() {
-            renderer.setAnimationLoop(render);
-        }
+						case '+':
+						case '=':
+							control.setSize( control.size + 0.1 );
+							break;
 
-        function render() {
-            const elapsedTime = clock.getElapsedTime();
+						case '-':
+						case '_':
+							control.setSize( Math.max( control.size - 0.1, 0.1 ) );
+							break;
 
-            group.rotation.set(0, 0, 0);
+						case 'x':
+							control.showX = ! control.showX;
+							break;
 
-            group.children.forEach(cubeContainer => {
-                const model = cubeContainer.getObjectByName("animatedItem");
-                if (model) {
-                    model.rotation.y = elapsedTime * 1.5;
-                    model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
-                }
-            });
+						case 'y':
+							control.showY = ! control.showY;
+							break;
 
-            if (renderer.xr.hasDepthSensing && renderer.xr.hasDepthSensing() && !isDepthSupplied) {
-                isDepthSupplied = true;
-                console.log('Depth sensing disponible');
-            } else if (renderer.xr.hasDepthSensing && !renderer.xr.hasDepthSensing() && isDepthSupplied) {
-                isDepthSupplied = false;
-            }
+						case 'z':
+							control.showZ = ! control.showZ;
+							break;
 
-            cleanIntersected();
-            intersectObjects(controller1);
+						case ' ':
+							control.enabled = ! control.enabled;
+							break;
 
-            const statusEl = document.getElementById('status');
-            if (statusEl) {
-                const hasTC = window._lab15 && window._lab15.transformControls ? 'ON' : 'OFF';
-                statusEl.innerHTML = 'Modo: ' + (renderer.xr.isPresenting ? 'XR' : 'DESKTOP') + ' | TC: ' + hasTC + ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
-            }
+						case 'Escape':
+							control.reset();
+							break;
 
-            controls.update();
-            renderer.render(scene, camera);
-        }
+					}
 
-    </script>
+				} );
 
-    <!-- TransformControls: modulo COMPLETAMENTE AISLADO -->
-    <script type="module">
-        try {
-            const L = window._lab15;
-            if (!L) {
-                console.warn('Lab15 principal no listo');
-                return;
-            }
+				window.addEventListener( 'keyup', function ( event ) {
 
-            const { TransformControls } = await import('three/addons/controls/TransformControls.js');
-            if (!TransformControls) {
-                console.warn('TransformControls no exportado');
-                return;
-            }
+					switch ( event.key ) {
 
-            const tc = new TransformControls(L.camera, L.renderer.domElement);
-            tc.attach(L.trophyContainer);
-            tc.setSize(0.75);
-            tc.setMode('translate');
-            tc.showX = true;
-            tc.showY = true;
-            tc.showZ = true;
-            L.scene.add(tc);
+						case 'Shift':
+							control.setTranslationSnap( null );
+							control.setRotationSnap( null );
+							control.setScaleSnap( null );
+							break;
 
-            tc.addEventListener('dragging-changed', function (event) {
-                L.controls.enabled = !event.value;
-            });
+					}
 
-            L.renderer.xr.addEventListener('sessionstart', function () {
-                tc.detach();
-                tc.visible = false;
-                L.controls.enabled = false;
-            });
+				} );
 
-            L.renderer.xr.addEventListener('sessionend', function () {
-                tc.attach(L.trophyContainer);
-                tc.visible = true;
-                L.controls.enabled = true;
-                L.controls.update();
-            });
+			}
 
-            L.transformControls = tc;
-            console.log('TransformControls activo');
+			function onWindowResize() {
 
-        } catch (err) {
-            console.error('TransformControls fallo:', err);
-        }
-    </script>
+				const aspect = window.innerWidth / window.innerHeight;
 
-</body>
+				cameraPersp.aspect = aspect;
+				cameraPersp.updateProjectionMatrix();
+
+				cameraOrtho.left = cameraOrtho.bottom * aspect;
+				cameraOrtho.right = cameraOrtho.top * aspect;
+				cameraOrtho.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+				render();
+
+			}
+
+			function render() {
+
+				renderer.render( scene, currentCamera );
+
+			}
+
+		</script>
+
+	</body>
 </html>
