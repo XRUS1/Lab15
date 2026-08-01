@@ -72,11 +72,11 @@
         const clock = new THREE.Clock();
 
         init();
-        render();
+        animate();
 
         function init() {
 
-            // --- RENDERER (con XR habilitado desde el inicio) ---
+            // --- RENDERER ---
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -87,7 +87,6 @@
             // --- CAMARA ---
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10);
             camera.position.set(0, 1.6, 3);
-            camera.lookAt(0, 1.0, -1.5);
 
             // --- ESCENA ---
             scene = new THREE.Scene();
@@ -144,9 +143,19 @@
                 console.error('Error al cargar el trofeo:', error);
             });
 
-            // --- TRANSFORM CONTROLS (ejemplo original adaptado) ---
+            // --- ORBIT CONTROLS (desktop) ---
+            const orbit = new OrbitControls(camera, renderer.domElement);
+            orbit.target.set(0, 1.6, 0);
+            orbit.update();
+
+            // --- TRANSFORM CONTROLS (ejemplo original) ---
             control = new TransformControls(camera, renderer.domElement);
-            control.addEventListener('change', render);
+            control.addEventListener('change', function () {
+                renderer.render(scene, camera);
+            });
+            control.addEventListener('dragging-changed', function (event) {
+                orbit.enabled = !event.value;
+            });
             control.attach(trophyContainer);
             control.setSize(0.75);
             control.setMode('translate');
@@ -184,11 +193,14 @@
             renderer.xr.addEventListener('sessionstart', function () {
                 control.detach();
                 control.visible = false;
+                orbit.enabled = false;
             });
 
             renderer.xr.addEventListener('sessionend', function () {
                 control.attach(trophyContainer);
                 control.visible = true;
+                orbit.enabled = true;
+                orbit.update();
             });
         }
 
@@ -196,7 +208,6 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            render();
         }
 
         // --- CONTROLADOR VR (Lab12) ---
@@ -208,7 +219,6 @@
             raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
             const intersections = raycaster.intersectObjects(scene.children, false);
 
-            // Solo intersectar el trophyContainer
             const hit = intersections.find(i => i.object === trophyContainer);
             if (hit) {
                 trophyContainer.material.opacity = 0.3;
@@ -227,6 +237,11 @@
                 trophyContainer.rotation.set(0, 0, 0);
                 controller.userData.selected = undefined;
             }
+        }
+
+        // --- LOOP DE ANIMACION (Lab12) ---
+        function animate() {
+            renderer.setAnimationLoop(render);
         }
 
         function render() {
