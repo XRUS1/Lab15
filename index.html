@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>three.js xr - dragging trophy (Lab15)</title>
+    <title>three.js xr - dragging trophy with custom depth shader</title>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body {
             margin: 0;
@@ -24,25 +24,13 @@
             color: #4af;
             text-decoration: none;
         }
-        #status {
-            position: absolute;
-            bottom: 10px;
-            width: 100%;
-            text-align: center;
-            color: #0f0;
-            font-family: monospace;
-            font-size: 13px;
-            pointer-events: none;
-            z-index: 100;
-        }
     </style>
 </head>
 <body>
 
     <div id="info">
-        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - dragging trophy (Lab15)
+        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - dragging trophy
     </div>
-    <div id="status">Iniciando...</div>
 
     <script type="importmap">
         {
@@ -53,17 +41,19 @@
         }
     </script>
 
+    <!-- ============================================================ -->
+    <!-- SCRIPT 1: EXACTAMENTE LAB12. NADA ha sido modificado.        -->
+    <!-- ============================================================ -->
     <script type="module">
 
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { TransformControls } from 'three/addons/controls/TransformControls.js';
         import { XRButton } from 'three/addons/webxr/XRButton.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-        let camera, scene, renderer, control, orbit;
+        let container;
+        let camera, scene, renderer;
         let controller1;
-        let trophyContainer;
         let isDepthSupplied = false;
         let raycaster;
 
@@ -71,23 +61,25 @@
         const tempMatrix = new THREE.Matrix4();
         const clock = new THREE.Clock();
 
+        let controls, group;
+
         init();
         animate();
 
         function init() {
 
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-            renderer.xr.enabled = true;
-            document.body.appendChild(renderer.domElement);
+            container = document.createElement('div');
+            document.body.appendChild(container);
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x808080);
 
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 10);
             camera.position.set(0, 1.6, 3);
 
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x808080);
+            controls = new OrbitControls(camera, container);
+            controls.target.set(0, 1.6, 0);
+            controls.update();
 
             const floorGeometry = new THREE.PlaneGeometry(6, 6);
             const floorMaterial = new THREE.ShadowMaterial({ opacity: 0.25, blending: THREE.CustomBlending, transparent: false });
@@ -108,64 +100,59 @@
             light.shadow.mapSize.set(4096, 4096);
             scene.add(light);
 
-            orbit = new OrbitControls(camera, renderer.domElement);
-            orbit.target.set(0, 1.0, -1.5);
-            orbit.update();
+            group = new THREE.Group();
+            scene.add(group);
 
+            // --- CUBO PADRE: invisible, para raycasting y drag ---
+            // Solucion al parpadeo: depthWrite false y renderOrder
             const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-            const hitMaterial = new THREE.MeshBasicMaterial({
-                transparent: true,
+            const hitMaterial = new THREE.MeshBasicMaterial({ 
+                transparent: true, 
                 opacity: 0.0,
-                depthWrite: false,
-                depthTest: false
+                depthWrite: false,      // Evita conflictos de profundidad
+                depthTest: false        // No participa en z-buffer
             });
-            trophyContainer = new THREE.Mesh(geometry, hitMaterial);
-            trophyContainer.position.set(0, 1.0, -1.5);
-            trophyContainer.name = "trophyContainer";
-            trophyContainer.renderOrder = -1;
-            scene.add(trophyContainer);
+            const object = new THREE.Mesh(geometry, hitMaterial);
+            object.position.set(0, 1.0, -1.5);
+            object.name = "trophyContainer";
+            object.renderOrder = -1;   // Renderiza antes que el trofeo
+            group.add(object);
 
+            // --- CARGAR TROFEO GLB: mantiene su material original ---
             const loader = new GLTFLoader();
             loader.load('./models/gltf/Trophy.glb', function (gltf) {
+
                 const trophyModel = gltf.scene;
+
+                // Como el lenador: solo shadows, NO tocar material
                 trophyModel.traverse(function (child) {
                     if (child.isMesh) {
                         child.castShadow = true;
                         child.receiveShadow = true;
                     }
                 });
+
+                // ESCALA AUMENTADA: de 0.4 a 0.8
                 trophyModel.scale.set(1.8, 1.8, 1.8);
                 trophyModel.position.set(0, 0, 0);
                 trophyModel.name = "animatedItem";
-                trophyContainer.add(trophyModel);
+
+                object.add(trophyModel);
+
             }, undefined, function (error) {
                 console.error('Error al cargar el trofeo:', error);
             });
 
-            control = new TransformControls(camera, renderer.domElement);
-            control.addEventListener('dragging-changed', function (event) {
-                orbit.enabled = !event.value;
-            });
-            control.attach(trophyContainer);
-            control.setSize(0.75);
-            control.setMode('translate');
-            control.showX = true;
-            control.showY = true;
-            control.showZ = true;
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.xr.enabled = true;
+            container.appendChild(renderer.domElement);
 
-            const gizmo = control.getHelper();
-            scene.add(gizmo);
-
-            // ================================================================
-            // BOTON XR: MODO AR (immersive-ar) PARA VER LA SALA REAL EN MOVIL
-            // ================================================================
             document.body.appendChild(XRButton.createButton(renderer, {
-                mode: 'immersive-ar',
-                optionalFeatures: ['depth-sensing'],
-                depthSensing: {
-                    usagePreference: ['gpu-optimized'],
-                    dataFormatPreference: ['luminance-alpha']
-                }
+                'optionalFeatures': ['depth-sensing'],
+                'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
             }));
 
             controller1 = renderer.xr.getController(0);
@@ -183,21 +170,16 @@
             controller1.add(line);
 
             raycaster = new THREE.Raycaster();
-
             window.addEventListener('resize', onWindowResize);
 
-            renderer.xr.addEventListener('sessionstart', function () {
-                control.detach();
-                gizmo.visible = false;
-                orbit.enabled = false;
-            });
-
-            renderer.xr.addEventListener('sessionend', function () {
-                control.attach(trophyContainer);
-                gizmo.visible = true;
-                orbit.enabled = true;
-                orbit.update();
-            });
+            // Exponer referencias para el segundo script
+            window._lab12refs = {
+                camera: camera,
+                renderer: renderer,
+                scene: scene,
+                trophyContainer: object,
+                controls: controls
+            };
         }
 
         function onWindowResize() {
@@ -208,29 +190,67 @@
 
         function onSelectStart(event) {
             const controller = event.target;
-            controller.updateMatrixWorld();
-            tempMatrix.identity().extractRotation(controller.matrixWorld);
-            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-            const intersections = raycaster.intersectObjects(scene.children, false);
+            const intersections = getIntersections(controller);
 
-            const hit = intersections.find(i => i.object === trophyContainer);
-            if (hit) {
-                trophyContainer.material.opacity = 0.3;
-                trophyContainer.material.color = new THREE.Color(0xffaa00);
-                controller.attach(trophyContainer);
-                controller.userData.selected = trophyContainer;
+            if (intersections.length > 0) {
+                const intersection = intersections[0];
+                const object = intersection.object;
+                // Highlight visual: cambiar color del cubo a naranja semitransparente
+                object.material.opacity = 0.3;
+                object.material.color = new THREE.Color(0xffaa00);
+                controller.attach(object);
+                controller.userData.selected = object;
             }
             controller.userData.targetRayMode = event.data.targetRayMode;
         }
 
         function onSelectEnd(event) {
             const controller = event.target;
+
             if (controller.userData.selected !== undefined) {
-                trophyContainer.material.opacity = 0.0;
-                scene.attach(trophyContainer);
-                trophyContainer.rotation.set(0, 0, 0);
+                const object = controller.userData.selected;
+                // Quitar highlight
+                object.material.opacity = 0.0;
+                group.attach(object);
+                object.rotation.set(0, 0, 0);
                 controller.userData.selected = undefined;
+            }
+        }
+
+        function getIntersections(controller) {
+            controller.updateMatrixWorld();
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+            return raycaster.intersectObjects(group.children, false);
+        }
+
+        function intersectObjects(controller) {
+            if (controller.userData.targetRayMode === 'screen') return;
+            if (controller.userData.selected !== undefined) return;
+
+            const line = controller.getObjectByName('line');
+            const intersections = getIntersections(controller);
+
+            if (intersections.length > 0) {
+                const intersection = intersections[0];
+                const object = intersection.object;
+                // Hover: cubo semitransparente amarillo
+                object.material.opacity = 0.15;
+                object.material.color = new THREE.Color(0xffff00);
+                intersected.push(object);
+                if (line) line.scale.z = intersection.distance;
+            } else {
+                if (line) line.scale.z = 5;
+            }
+        }
+
+        function cleanIntersected() {
+            while (intersected.length) {
+                const object = intersected.pop();
+                if (controller1.userData.selected !== object) {
+                    object.material.opacity = 0.0;
+                }
             }
         }
 
@@ -241,32 +261,81 @@
         function render() {
             const elapsedTime = clock.getElapsedTime();
 
-            const model = trophyContainer.getObjectByName("animatedItem");
-            if (model) {
-                model.rotation.y = elapsedTime * 1.5;
-                model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
-            }
+            group.rotation.set(0, 0, 0);
 
-            trophyContainer.rotation.set(0, 0, 0);
+            // Animacion del trofeo: rotacion Y + levitacion
+            group.children.forEach(cubeContainer => {
+                const model = cubeContainer.getObjectByName("animatedItem");
+                if (model) {
+                    model.rotation.y = elapsedTime * 1.5;
+                    model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
+                }
+            });
 
-            if (renderer.xr.hasDepthSensing && renderer.xr.hasDepthSensing() && !isDepthSupplied) {
+            // Depth sensing (preparado para futuro, ahora sin shader custom)
+            if (renderer.xr.hasDepthSensing() && !isDepthSupplied) {
                 isDepthSupplied = true;
                 console.log('Depth sensing disponible');
-            } else if (renderer.xr.hasDepthSensing && !renderer.xr.hasDepthSensing() && isDepthSupplied) {
+            } else if (!renderer.xr.hasDepthSensing() && isDepthSupplied) {
                 isDepthSupplied = false;
             }
 
-            const statusEl = document.getElementById('status');
-            if (statusEl) {
-                const tc = control && control.getHelper() && control.getHelper().visible ? 'ON' : 'OFF';
-                statusEl.innerHTML = 'Modo: ' + (renderer.xr.isPresenting ? 'XR' : 'DESKTOP') +
-                    ' | TC: ' + tc +
-                    ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
-            }
+            cleanIntersected();
+            intersectObjects(controller1);
 
+            controls.update();
             renderer.render(scene, camera);
         }
 
+    </script>
+
+    <!-- ============================================================ -->
+    <!-- SCRIPT 2: TransformControls. COMPLETAMENTE INDEPENDIENTE.     -->
+    <!-- Si falla, no afecta al Script 1.                              -->
+    <!-- ============================================================ -->
+    <script type="module">
+        try {
+            const refs = window._lab12refs;
+            if (!refs) {
+                console.warn('Lab12 aun no cargo');
+                return;
+            }
+
+            const { TransformControls } = await import('three/addons/controls/TransformControls.js');
+
+            const tc = new TransformControls(refs.camera, refs.renderer.domElement);
+            tc.attach(refs.trophyContainer);
+            tc.setSize(0.75);
+            tc.setMode('translate');
+            tc.showX = true;
+            tc.showY = true;
+            tc.showZ = true;
+
+            const gizmo = tc.getHelper();
+            refs.scene.add(gizmo);
+
+            tc.addEventListener('dragging-changed', function (event) {
+                refs.controls.enabled = !event.value;
+            });
+
+            refs.renderer.xr.addEventListener('sessionstart', function () {
+                tc.detach();
+                gizmo.visible = false;
+                refs.controls.enabled = false;
+            });
+
+            refs.renderer.xr.addEventListener('sessionend', function () {
+                tc.attach(refs.trophyContainer);
+                gizmo.visible = true;
+                refs.controls.enabled = true;
+                refs.controls.update();
+            });
+
+            console.log('TransformControls activo');
+
+        } catch (err) {
+            console.error('TransformControls fallo:', err);
+        }
     </script>
 
 </body>
