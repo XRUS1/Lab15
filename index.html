@@ -1,49 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>three.js xr - dragging trophy (Lab15) - TransformControls Always</title>
+    <title>Lab15 - TransformControls + Lab12 AR</title>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body {
-            margin: 0;
-            background-color: #000;
-            color: #fff;
-            font-family: sans-serif;
-            overflow: hidden;
-        }
-        #info {
-            position: absolute;
-            top: 10px;
-            width: 100%;
-            text-align: center;
-            z-index: 100;
-            pointer-events: none;
-        }
-        a {
-            color: #4af;
-            text-decoration: none;
-        }
-        #status {
-            position: absolute;
-            top: 50px;
-            left: 10px;
-            color: #0f0;
-            font-family: monospace;
-            font-size: 12px;
-            pointer-events: none;
-            z-index: 100;
-            background: rgba(0,0,0,0.5);
-            padding: 5px;
-        }
+        body { margin: 0; background-color: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
+        #info { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 100; pointer-events: none; }
+        a { color: #4af; text-decoration: none; }
     </style>
 </head>
 <body>
 
     <div id="info">
-        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - TransformControls always on
+        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> Lab15
     </div>
-    <div id="status">Iniciando...</div>
 
     <script type="importmap">
         {
@@ -62,11 +33,16 @@
         import { XRButton } from 'three/addons/webxr/XRButton.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-        let camera, scene, renderer, control, orbit;
+        let camera, scene, renderer;
+        let orbit, control;
         let controller1;
         let trophyContainer;
+        let group;
         let isDepthSupplied = false;
+        let raycaster;
 
+        const intersected = [];
+        const tempMatrix = new THREE.Matrix4();
         const clock = new THREE.Clock();
 
         init();
@@ -110,21 +86,24 @@
             orbit.target.set(0, 1.0, -1.5);
             orbit.update();
 
-            // --- Cubo invisible hit-test ---
+            // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+            //  GROUP + CUBO PADRE (exactamente como Lab12)
+            // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+            group = new THREE.Group();
+            scene.add(group);
+
             const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
             const hitMaterial = new THREE.MeshBasicMaterial({
-                transparent: true,
-                opacity: 0.0,
-                depthWrite: false,
-                depthTest: false
+                transparent: true, opacity: 0.0,
+                depthWrite: false, depthTest: false
             });
             trophyContainer = new THREE.Mesh(geometry, hitMaterial);
             trophyContainer.position.set(0, 1.0, -1.5);
             trophyContainer.name = "trophyContainer";
             trophyContainer.renderOrder = -1;
-            scene.add(trophyContainer);
+            group.add(trophyContainer);
 
-            // --- Cargar trofeo ---
+            // --- Cargar trofeo dentro del cubo padre ---
             const loader = new GLTFLoader();
             loader.load('./models/gltf/Trophy.glb', function (gltf) {
                 const trophyModel = gltf.scene;
@@ -143,8 +122,7 @@
             });
 
             // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-            //  TRANSFORM CONTROLS â€” Siempre activo, antes y despuÃ©s del botÃ³n
-            //  Tercer argumento: renderer (esencial para XR)
+            //  TRANSFORM CONTROLS â€” Desktop (antes del botÃ³n)
             // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
             control = new TransformControls(camera, renderer.domElement, renderer);
             control.addEventListener('dragging-changed', function (event) {
@@ -166,8 +144,12 @@
                 'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
             }));
 
-            // --- Controlador VR (referencia visual del rayo) ---
+            // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+            //  CONTROLADOR VR â€” Exactamente como Lab12
+            // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
             controller1 = renderer.xr.getController(0);
+            controller1.addEventListener('selectstart', onSelectStart);
+            controller1.addEventListener('selectend', onSelectEnd);
             scene.add(controller1);
 
             const lineGeometry = new THREE.BufferGeometry().setFromPoints([
@@ -179,24 +161,23 @@
             line.scale.z = 5;
             controller1.add(line);
 
+            raycaster = new THREE.Raycaster();
             window.addEventListener('resize', onWindowResize);
 
             // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-            //  ALTERNAR ENTRE DESKTOP Y XR
-            //  TransformControls SIEMPRE visible y activo
+            //  ALTERNANCIA DESKTOP / XR
             // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
             renderer.xr.addEventListener('sessionstart', function () {
-                // En XR: desactivar orbit, gizmo mÃ¡s grande para controladores
                 orbit.enabled = false;
-                control.setSize(1.5);
-                // TransformControls se mantiene attachado y visible
+                control.detach();
+                control.enabled = false;
             });
 
             renderer.xr.addEventListener('sessionend', function () {
-                // Al volver a desktop: reactivar orbit, gizmo tamaÃ±o normal
                 orbit.enabled = true;
                 orbit.update();
-                control.setSize(0.75);
+                control.attach(trophyContainer);
+                control.enabled = true;
             });
         }
 
@@ -206,6 +187,71 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        //  DRAG EN AR â€” Exactamente como Lab12
+        // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        function onSelectStart(event) {
+            const controller = event.target;
+            const intersections = getIntersections(controller);
+
+            if (intersections.length > 0) {
+                const intersection = intersections[0];
+                const object = intersection.object;
+                object.material.opacity = 0.3;
+                object.material.color = new THREE.Color(0xffaa00);
+                controller.attach(object);
+                controller.userData.selected = object;
+            }
+            controller.userData.targetRayMode = event.data.targetRayMode;
+        }
+
+        function onSelectEnd(event) {
+            const controller = event.target;
+            if (controller.userData.selected !== undefined) {
+                const object = controller.userData.selected;
+                object.material.opacity = 0.0;
+                group.attach(object);
+                object.rotation.set(0, 0, 0);
+                controller.userData.selected = undefined;
+            }
+        }
+
+        function getIntersections(controller) {
+            controller.updateMatrixWorld();
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+            return raycaster.intersectObjects(group.children, false);
+        }
+
+        function intersectObjects(controller) {
+            if (controller.userData.targetRayMode === 'screen') return;
+            if (controller.userData.selected !== undefined) return;
+
+            const line = controller.getObjectByName('line');
+            const intersections = getIntersections(controller);
+
+            if (intersections.length > 0) {
+                const intersection = intersections[0];
+                const object = intersection.object;
+                object.material.opacity = 0.15;
+                object.material.color = new THREE.Color(0xffff00);
+                intersected.push(object);
+                if (line) line.scale.z = intersection.distance;
+            } else {
+                if (line) line.scale.z = 5;
+            }
+        }
+
+        function cleanIntersected() {
+            while (intersected.length) {
+                const object = intersected.pop();
+                if (controller1.userData.selected !== object) {
+                    object.material.opacity = 0.0;
+                }
+            }
+        }
+
         function animate() {
             renderer.setAnimationLoop(render);
         }
@@ -213,30 +259,33 @@
         function render() {
             const elapsedTime = clock.getElapsedTime();
 
-            // AnimaciÃ³n del trofeo
-            const model = trophyContainer.getObjectByName("animatedItem");
-            if (model) {
-                model.rotation.y = elapsedTime * 1.5;
-                model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
-            }
+            // â”€â”€â”€ Bloquear rotaciÃ³n del grupo (cara de abajo siempre abajo) â”€â”€â”€
+            group.rotation.set(0, 0, 0);
 
-            trophyContainer.rotation.set(0, 0, 0);
+            // AnimaciÃ³n del trofeo
+            group.children.forEach(cubeContainer => {
+                const model = cubeContainer.getObjectByName("animatedItem");
+                if (model) {
+                    model.rotation.y = elapsedTime * 1.5;
+                    model.position.y = Math.sin(elapsedTime * 2.5) * 0.03;
+                }
+            });
 
             // Depth sensing
-            if (renderer.xr.hasDepthSensing && renderer.xr.hasDepthSensing() && !isDepthSupplied) {
+            if (renderer.xr.hasDepthSensing() && !isDepthSupplied) {
                 isDepthSupplied = true;
                 console.log('Depth sensing disponible');
-            } else if (renderer.xr.hasDepthSensing && !renderer.xr.hasDepthSensing() && isDepthSupplied) {
+            } else if (!renderer.xr.hasDepthSensing() && isDepthSupplied) {
                 isDepthSupplied = false;
             }
 
-            // Status
-            const statusEl = document.getElementById('status');
-            if (statusEl) {
-                const tc = control && control.getHelper() && control.getHelper().visible ? 'ON' : 'OFF';
-                statusEl.innerHTML = 'Modo: ' + (renderer.xr.isPresenting ? 'XR' : 'DESKTOP') +
-                    ' | TC: ' + tc +
-                    ' | Depth: ' + (isDepthSupplied ? 'ON' : 'OFF');
+            // Hover en AR (como Lab12)
+            cleanIntersected();
+            intersectObjects(controller1);
+
+            // Actualizar gizmo TC (solo desktop)
+            if (control && control.enabled) {
+                control.update();
             }
 
             renderer.render(scene, camera);
