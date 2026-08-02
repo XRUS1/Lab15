@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>three.js xr - dragging trophy (Lab15)</title>
+    <title>three.js xr - dragging trophy (Lab15) - TransformControls Always</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <style>
@@ -41,7 +41,7 @@
 <body>
 
     <div id="info">
-        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - dragging trophy (Lab15)
+        <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> xr - TransformControls always on
     </div>
     <div id="status">Iniciando...</div>
 
@@ -66,10 +66,7 @@
         let controller1;
         let trophyContainer;
         let isDepthSupplied = false;
-        let raycaster;
 
-        const intersected = [];
-        const tempMatrix = new THREE.Matrix4();
         const clock = new THREE.Clock();
 
         init();
@@ -113,6 +110,7 @@
             orbit.target.set(0, 1.0, -1.5);
             orbit.update();
 
+            // --- Cubo invisible hit-test ---
             const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
             const hitMaterial = new THREE.MeshBasicMaterial({
                 transparent: true,
@@ -126,6 +124,7 @@
             trophyContainer.renderOrder = -1;
             scene.add(trophyContainer);
 
+            // --- Cargar trofeo ---
             const loader = new GLTFLoader();
             loader.load('./models/gltf/Trophy.glb', function (gltf) {
                 const trophyModel = gltf.scene;
@@ -143,10 +142,10 @@
                 console.error('Error al cargar el trofeo:', error);
             });
 
-            // ================================================================
-            // TRANSFORM CONTROLS CON RENDERER COMO TERCER PARAMETRO
-            // Esto es lo que faltaba segun el foro de Three.js
-            // ================================================================
+            // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+            //  TRANSFORM CONTROLS â€” Siempre activo, antes y despuÃ©s del botÃ³n
+            //  Tercer argumento: renderer (esencial para XR)
+            // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
             control = new TransformControls(camera, renderer.domElement, renderer);
             control.addEventListener('dragging-changed', function (event) {
                 orbit.enabled = !event.value;
@@ -161,16 +160,14 @@
             const gizmo = control.getHelper();
             scene.add(gizmo);
 
-            // --- BOTON XR ---
+            // --- BotÃ³n XR ---
             document.body.appendChild(XRButton.createButton(renderer, {
                 'optionalFeatures': ['depth-sensing'],
                 'depthSensing': { 'usagePreference': ['gpu-optimized'], 'dataFormatPreference': ['luminance-alpha'] }
             }));
 
-            // --- CONTROLADOR VR (Lab12) ---
+            // --- Controlador VR (referencia visual del rayo) ---
             controller1 = renderer.xr.getController(0);
-            controller1.addEventListener('selectstart', onSelectStart);
-            controller1.addEventListener('selectend', onSelectEnd);
             scene.add(controller1);
 
             const lineGeometry = new THREE.BufferGeometry().setFromPoints([
@@ -182,22 +179,24 @@
             line.scale.z = 5;
             controller1.add(line);
 
-            raycaster = new THREE.Raycaster();
-
             window.addEventListener('resize', onWindowResize);
 
-            // --- ALTERNAR ENTRE DESKTOP Y XR ---
+            // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+            //  ALTERNAR ENTRE DESKTOP Y XR
+            //  TransformControls SIEMPRE visible y activo
+            // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
             renderer.xr.addEventListener('sessionstart', function () {
-                control.detach();
-                gizmo.visible = false;
+                // En XR: desactivar orbit, gizmo mÃ¡s grande para controladores
                 orbit.enabled = false;
+                control.setSize(1.5);
+                // TransformControls se mantiene attachado y visible
             });
 
             renderer.xr.addEventListener('sessionend', function () {
-                control.attach(trophyContainer);
-                gizmo.visible = true;
+                // Al volver a desktop: reactivar orbit, gizmo tamaÃ±o normal
                 orbit.enabled = true;
                 orbit.update();
+                control.setSize(0.75);
             });
         }
 
@@ -207,34 +206,6 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function onSelectStart(event) {
-            const controller = event.target;
-            controller.updateMatrixWorld();
-            tempMatrix.identity().extractRotation(controller.matrixWorld);
-            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-            const intersections = raycaster.intersectObjects(scene.children, false);
-
-            const hit = intersections.find(i => i.object === trophyContainer);
-            if (hit) {
-                trophyContainer.material.opacity = 0.3;
-                trophyContainer.material.color = new THREE.Color(0xffaa00);
-                controller.attach(trophyContainer);
-                controller.userData.selected = trophyContainer;
-            }
-            controller.userData.targetRayMode = event.data.targetRayMode;
-        }
-
-        function onSelectEnd(event) {
-            const controller = event.target;
-            if (controller.userData.selected !== undefined) {
-                trophyContainer.material.opacity = 0.0;
-                scene.attach(trophyContainer);
-                trophyContainer.rotation.set(0, 0, 0);
-                controller.userData.selected = undefined;
-            }
-        }
-
         function animate() {
             renderer.setAnimationLoop(render);
         }
@@ -242,6 +213,7 @@
         function render() {
             const elapsedTime = clock.getElapsedTime();
 
+            // AnimaciÃ³n del trofeo
             const model = trophyContainer.getObjectByName("animatedItem");
             if (model) {
                 model.rotation.y = elapsedTime * 1.5;
@@ -250,6 +222,7 @@
 
             trophyContainer.rotation.set(0, 0, 0);
 
+            // Depth sensing
             if (renderer.xr.hasDepthSensing && renderer.xr.hasDepthSensing() && !isDepthSupplied) {
                 isDepthSupplied = true;
                 console.log('Depth sensing disponible');
@@ -257,6 +230,7 @@
                 isDepthSupplied = false;
             }
 
+            // Status
             const statusEl = document.getElementById('status');
             if (statusEl) {
                 const tc = control && control.getHelper() && control.getHelper().visible ? 'ON' : 'OFF';
@@ -269,7 +243,5 @@
         }
 
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-     <script>eruda.init();</script>
 </body>
 </html>
